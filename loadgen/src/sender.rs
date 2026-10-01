@@ -64,7 +64,7 @@ use gateway::{GatewayCounters, gateway_of};
 use pipeline::affinity::pin_current_thread;
 use pipeline::clock::RunClock;
 use pipeline::codec::{COMMAND_WORDS, encode_command};
-use pipeline::counters::{BusyMeter, PipelineCounters, ThreadCounters};
+use pipeline::counters::{BusyMeter, PipelineCounters, SharedCounter, ThreadCounters};
 use pipeline::gate::Phases;
 use pipeline::histogram::LatencyHistogram;
 use pipeline::idle::IdleStrategy;
@@ -284,11 +284,14 @@ impl Barrier {
 }
 
 /// What the sender shares with main while the run goes (3.2): its busy time and its OS
-/// thread id (15.4). Its counts are its own ([`SenderStats`]): the barriers are the sender's,
+/// thread id (15.4), and the client items it has sent so far, which only `e2e run --watch`
+/// reads. Its other counts are its own ([`SenderStats`]): the barriers are the sender's,
 /// and main reads the counts when the sender is joined.
 #[derive(Debug, Default)]
 pub struct SenderCounters {
     pub thread: ThreadCounters,
+    /// Client items written into a ring so far ([`SenderStats::client_sent`]).
+    pub client_sent: SharedCounter,
 }
 
 /// Everything the sender thread needs besides its plan and its rings.
@@ -571,6 +574,7 @@ impl Sender<'_> {
         self.stats.offered += 1;
         if sent {
             self.stats.client_sent += 1;
+            self.config.counters.client_sent.store(self.stats.client_sent);
         } else {
             self.stats.dropped[ring] += 1;
         }

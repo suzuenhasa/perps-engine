@@ -25,7 +25,9 @@
 //! 4. **Main's loop** (`Watcher`, 2.2): every millisecond it looks where the run is by
 //!    those phases, samples every hot thread's counters when the window opens and when it
 //!    closes (15.4), and, for the "fsync per order" ablation, stops the sender if the
-//!    backlog hasn't drained within the cap after the window (16). It never touches a ring.
+//!    backlog hasn't drained within the cap after the window (16). With `--watch` it also
+//!    draws the live panel ten times a second and records it (`watch.rs`). It never
+//!    touches a ring.
 //! 5. **Stopping follows the data** (2.8): when the sender is done it drops its ring ends;
 //!    main joins the sender, then the gateways, then the pipeline, whose threads stop by
 //!    themselves in data-flow order. Then it reads the throttling counters again, and
@@ -92,6 +94,7 @@ use super::config::{Cpus, RunConfig, VerifyArm};
 use super::probes::{ClockCheck, Mount, cpu_mhz, file_system_of};
 use super::results::{Completed, FlowContent, RunResult, Throttled};
 use super::units::short_rate;
+use super::watch::{Panel, WATCH_FILE};
 use super::workload::{Workload, Workloads, rest_of_plan};
 
 /// Operator ring slots (2.3).
@@ -360,9 +363,16 @@ impl Setup<'_> {
             config.name(),
             short_rate(config.rate)
         );
-        let watcher =
-            Watcher { phases: pipeline.shared_phases(), clock, watched, config, stop, layout: &self.layout };
-        let mut monitor = watcher.watch(&sender, observer);
+        let phases = pipeline.shared_phases();
+        let watcher = Watcher {
+            phases: Arc::clone(&phases),
+            clock,
+            watched: watched.clone(),
+            config,
+            stop,
+            layout: &self.layout,
+        };
+        let (mut monitor, panel) = watcher.watch(&sender, observer);
 
         // Stopping follows the data (2.8): the sender, then the gateways, then the pipeline.
         let sender = sender.join().expect("a panic aborts the process before this");
@@ -370,6 +380,12 @@ impl Setup<'_> {
             gateways.into_iter().map(|g| g.join().expect("a panic aborts the process before this")).collect();
         let mut output = pipeline.join();
         let duration_ns = started.elapsed().as_nanos() as u64;
+        // The panel's last frame, now that every count is final.
+        if let Some(panel) = panel
+            && let Err(e) = panel.finish(&watched, &phases, clock.now(), self.dir)
+        {
+            eprintln!("run {}: couldn't write {WATCH_FILE}: {e}", config.name());
+        }
         let throttled = throttled(self.throttling_before, Throttling::read()?);
         monitor.check_drained(config.drain_cap_ns);
         eprintln!("run {}: every thread stopped after {:.1} s", config.name(), duration_ns as f64 / 1e9);
@@ -467,6 +483,7 @@ impl Setup<'_> {
             idle: config.idle,
             capture: config.capture.then_some(commands * CAPTURE_SLOTS_PER_COMMAND),
             release_log: if config.release_log { Some(stdout_file()?) } else { None },
+            live: config.watch,
             stamps: config.stamps,
             phases: Phases::not_yet(),
             ablation_verify_on_core: ablation,
@@ -592,11 +609,24 @@ struct Watcher<'a> {
 }
 
 impl Watcher<'_> {
-    /// Looks at the run every millisecond until the sender has finished.
-    fn watch(self, sender: &JoinHandle<SenderStats>, observer: &mut dyn RunObserver) -> Monitor {
+    /// Looks at the run every millisecond until the sender has finished. Returns what it saw,
+    /// and the live panel (`--watch`), whose last frame the run takes once every thread has
+    /// stopped.
+    fn watch(
+        self,
+        sender: &JoinHandle<SenderStats>,
+        observer: &mut dyn RunObserver,
+    ) -> (Monitor, Option<Panel>) {
         let name = self.config.name();
         let mut monitor = Monitor::default();
         let mut timed_started = false;
+        let mut panel = self.config.watch.then(|| Panel::new(self.config));
+        // The panel shows the edges itself.
+        let say = |text: &str| {
+            if !self.config.watch {
+                eprintln!("run {name}: {text}");
+            }
+        };
         while !sender.is_finished() {
             std::thread::sleep(POLL);
             let now = self.clock.now();
@@ -607,13 +637,13 @@ impl Watcher<'_> {
             }
             if monitor.open.is_none() && phase == Phase::Window {
                 monitor.open = Some(self.watched.sample(now, Edge::Open));
-                eprintln!("run {name}: the measured window opened");
+                say("the measured window opened");
             }
             if monitor.open.is_some() && monitor.close.is_none() && phase != Phase::Window {
                 monitor.close = Some(self.watched.sample(now, Edge::Close));
                 monitor.core_mhz = self.layout.cpu(Role::Core).and_then(cpu_mhz);
                 monitor.window_closed_at = Some(Instant::now());
-                eprintln!("run {name}: the measured window closed");
+                say("the measured window closed");
             }
             if let (Some(cap), Some(closed)) = (self.config.drain_cap_ns, monitor.window_closed_at)
                 && closed.elapsed() > Duration::from_nanos(cap)
@@ -624,13 +654,18 @@ impl Watcher<'_> {
                     "run {name}: the backlog hadn't drained {cap} ns after the window: the sender stops"
                 );
             }
+            // Last, with its own clock read: drawing can block on a slow terminal, and the
+            // samples above must be read right after the `now` they are stamped with.
+            if let Some(panel) = &mut panel {
+                panel.tick(&self.watched, &self.phases, self.clock.now());
+            }
         }
         if monitor.open.is_some() && monitor.close.is_none() {
             // Some threads may have ended already: their faults then read as unknown.
             monitor.close = Some(self.watched.sample(self.clock.now(), Edge::Close));
             monitor.closed_early = true;
         }
-        monitor
+        (monitor, panel)
     }
 }
 

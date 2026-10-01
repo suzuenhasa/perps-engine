@@ -172,6 +172,7 @@ fn eip712_messages_go_through_the_gateways_and_pass_the_audit() {
         idle: IDLE,
         capture: None,
         release_log: None,
+        live: false,
         stamps: Stamps::On,
         phases: Phases::not_yet(),
         ablation_verify_on_core: None,

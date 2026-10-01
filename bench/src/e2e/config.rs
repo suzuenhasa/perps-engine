@@ -172,6 +172,9 @@ pub struct RunConfig {
     pub keep_journal: bool,
     /// Write every released event slot to standard output (the kill test, 18.4).
     pub release_log: bool,
+    /// Show the live panel while the run goes, and record it to `watch.jsonl` (`watch.rs`).
+    /// Display only: not part of the run's fingerprint.
+    pub watch: bool,
     /// Restart on the journal already in the run directory (13.5) and send the rest of the
     /// flow.
     pub resume: bool,
@@ -213,6 +216,7 @@ impl RunConfig {
             drain_cap_ns: None,
             keep_journal: false,
             release_log: false,
+            watch: false,
             resume: false,
             allow_engine_change: false,
             allow_generator_limited: false,
@@ -382,8 +386,8 @@ impl RunConfig {
 
     /// Every setting that makes two runs comparable, as the `run.*` keys and values the
     /// run's summary records (module docs, "The fingerprint"). Left out: what doesn't
-    /// change what is measured (keeping the journal, the release log, the barrier's
-    /// allowance), and a restart, which only `e2e run --resume` makes.
+    /// change what is measured (keeping the journal, the release log, the live panel, the
+    /// barrier's allowance), and a restart, which only `e2e run --resume` makes.
     pub fn fingerprint(&self) -> Vec<(&'static str, String)> {
         let journal = self.journal;
         let cpus = match &self.cpus {

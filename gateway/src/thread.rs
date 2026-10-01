@@ -122,6 +122,9 @@ pub struct GatewayCounters {
     /// Messages rejected so far. Main's barriers wait until
     /// `released + gateway rejects + ingress drops == messages sent` (14.4).
     pub rejected: SharedCounter,
+    /// Messages forwarded so far, stored after every batch; only `e2e run --watch` reads
+    /// it.
+    pub forwarded: SharedCounter,
 }
 
 /// Everything a gateway thread needs besides its gateway and its two rings.
@@ -196,6 +199,7 @@ pub fn run_gateway(
             handle(&mut gateway, &IngressSlot::from_words(&words), &mut lane, config, &mut stats);
         }
         ingress.release();
+        config.counters.forwarded.store(stats.forwarded);
         busy.end(config.clock.now(), &config.counters.thread.busy_ns);
     }
     stats

@@ -284,6 +284,7 @@ fn fresh_start_over_a_lost_header_sector() {
         idle: IDLE,
         capture: None,
         release_log: None,
+        live: false,
         stamps: Stamps::On,
         phases: Phases::everything(),
         ablation_verify_on_core: None,

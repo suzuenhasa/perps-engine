@@ -105,6 +105,9 @@ pub struct PipelineConfig {
     pub capture: Option<usize>,
     /// The kill test's release log (18.4).
     pub release_log: Option<File>,
+    /// The gate keeps running totals of the released events, for `e2e run --watch`
+    /// (`PipelineCounters::live`).
+    pub live: bool,
     pub stamps: Stamps,
     /// Which commands are setup and which are measured (15.5); main can change it while
     /// the pipeline runs ([`Pipeline::phases`]).
@@ -273,6 +276,7 @@ impl Pipeline {
                 stamps: config.stamps,
                 capture: config.capture,
                 release_log: config.release_log,
+                live: config.live,
                 clock,
             },
         );

@@ -52,7 +52,7 @@ use super::summary::Summary;
 use super::units::{latency, percent_ppm, ppm};
 
 /// Every hot thread's counters, as main reads them.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Watched {
     pub pipeline: Arc<PipelineCounters>,
     pub gateways: Vec<Arc<GatewayCounters>>,

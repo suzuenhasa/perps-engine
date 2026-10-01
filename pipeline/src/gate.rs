@@ -68,7 +68,7 @@ use engine::types::MarketId;
 
 use crate::clock::RunClock;
 use crate::codec::{EVENT_WORDS, cancel_reason_code, command_tags, decode_event, reject_reason_code};
-use crate::counters::{BusyMeter, PipelineCounters, Watermark};
+use crate::counters::{BusyMeter, LiveCounts, PipelineCounters, Watermark};
 use crate::histogram::LatencyHistogram;
 use crate::idle::IdleStrategy;
 use crate::records::{
@@ -152,6 +152,13 @@ impl Phases {
     /// served (15.4).
     pub fn phase_of(&self, t_sched: u64) -> Phase {
         self.load().classify(t_sched)
+    }
+
+    /// When the timed flow started and the measured window, once they are set; for main's
+    /// display (`e2e run --watch`).
+    pub fn timed(&self) -> Option<(u64, Range<u64>)> {
+        let bounds = self.load();
+        (bounds.timed_start != u64::MAX).then_some((bounds.timed_start, bounds.window.0..bounds.window.1))
     }
 
     fn load(&self) -> PhaseBounds {
@@ -507,6 +514,9 @@ pub struct GateConfig {
     pub capture: Option<usize>,
     /// Where to write every released event slot, for the kill test (18.4).
     pub release_log: Option<File>,
+    /// Keep running totals of the released events for `e2e run --watch`
+    /// ([`PipelineCounters::live`]).
+    pub live: bool,
     pub clock: RunClock,
 }
 
@@ -623,6 +633,8 @@ pub struct Gate {
     previous_done: u64,
     capture: Option<Capture>,
     release_log: Option<BufWriter<File>>,
+    /// The released events so far, if the run watches them (`GateConfig::live`).
+    live: Option<EventCounts>,
     busy: BusyMeter,
 }
 
@@ -640,6 +652,7 @@ impl Gate {
             previous_done: 0,
             capture: config.capture.map(Capture::reserve),
             release_log: config.release_log.map(BufWriter::new),
+            live: config.live.then(EventCounts::default),
             busy: BusyMeter::new(),
         }
     }
@@ -674,6 +687,9 @@ impl Gate {
         }
         self.events.release();
         if released > 0 {
+            if let Some(live) = &self.live {
+                publish_live(live, &counters.live);
+            }
             self.busy.end(self.clock.now(), &counters.gate.busy_ns);
         }
         released
@@ -779,6 +795,9 @@ impl Gate {
             Phase::Other => {}
         }
         self.fund.sample(phase == Phase::Window);
+        if let Some(live) = &mut self.live {
+            live.add(&self.pending);
+        }
         self.stats.commands += 1;
         self.stats.max_events_per_command = self.stats.max_events_per_command.max(u64::from(trailer.events));
         self.pending = EventCounts::default();
@@ -847,6 +866,18 @@ pub fn run_gate(
         }
     }
     gate.finish()
+}
+
+/// Stores the running totals for `e2e run --watch` (`GateConfig::live`). Notional above
+/// `u64::MAX` micro-dollars (about $18 trillion) reads as `u64::MAX`.
+fn publish_live(totals: &EventCounts, live: &LiveCounts) {
+    live.events.store(totals.events);
+    live.fills.store(totals.fills);
+    live.fill_notional.store(u64::try_from(totals.fill_notional).unwrap_or(u64::MAX));
+    live.cancels.store(totals.cancels.iter().sum());
+    live.modifies.store(totals.modifies);
+    live.marks.store(totals.marks);
+    live.liquidations.store(totals.liquidations);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -943,6 +974,7 @@ mod tests {
             stamps: Stamps::On,
             capture,
             release_log: None,
+            live: false,
             clock: RunClock::start(),
         };
         (producer, Gate::new(consumer, config))
@@ -1020,6 +1052,7 @@ mod tests {
             stamps: Stamps::On,
             capture: None,
             release_log: None,
+            live: false,
             clock: RunClock::start(),
         };
         let mut gate = Gate::new(consumer, config);

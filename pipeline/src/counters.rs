@@ -199,6 +199,40 @@ pub struct PipelineCounters {
     pub journal_sync_ns: SharedCounter,
     /// The journal writer's flushes so far (15.8).
     pub journal_flushes: SharedCounter,
+    /// What the released events said so far, for `e2e run --watch`; written by the gate
+    /// only when the run asks for it ([`LiveCounts`]).
+    pub live: LiveCounts,
+}
+
+/// The released engine events counted as the run goes, over the whole run, for the live
+/// panel of `e2e run --watch`. The gate keeps these totals only when the run asks for them
+/// (`GateConfig::live`): it adds each command's counts as it releases the command, and
+/// stores the totals at the end of every pass that released something. Display only:
+/// nothing waits on them.
+#[derive(Debug, Default)]
+pub struct LiveCounts {
+    pub events: SharedCounter,
+    pub fills: SharedCounter,
+    /// Sum of `price × qty` over fills, in micro-dollars.
+    pub fill_notional: SharedCounter,
+    pub cancels: SharedCounter,
+    pub modifies: SharedCounter,
+    pub marks: SharedCounter,
+    pub liquidations: SharedCounter,
+}
+
+impl LiveCounts {
+    pub const fn new() -> Self {
+        LiveCounts {
+            events: SharedCounter::new(),
+            fills: SharedCounter::new(),
+            fill_notional: SharedCounter::new(),
+            cancels: SharedCounter::new(),
+            modifies: SharedCounter::new(),
+            marks: SharedCounter::new(),
+            liquidations: SharedCounter::new(),
+        }
+    }
 }
 
 impl PipelineCounters {
@@ -214,6 +248,7 @@ impl PipelineCounters {
             sequencer_journal_full_passes: SharedCounter::new(),
             journal_sync_ns: SharedCounter::new(),
             journal_flushes: SharedCounter::new(),
+            live: LiveCounts::new(),
         }
     }
 

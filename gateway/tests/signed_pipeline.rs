@@ -199,6 +199,7 @@ impl Harness {
             idle: IDLE,
             capture: None,
             release_log: None,
+            live: false,
             stamps: Stamps::On,
             phases: Phases::not_yet(),
             ablation_verify_on_core: None,

@@ -89,6 +89,7 @@ fn a_command_whose_events_filled_the_ring_is_not_released_before_its_trailer() {
             stamps: Stamps::On,
             capture: Some(64),
             release_log: None,
+            live: false,
             clock,
         };
         let mut gate = Gate::new(event_out, config);

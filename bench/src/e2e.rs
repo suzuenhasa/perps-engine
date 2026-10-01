@@ -21,6 +21,7 @@
 //! - [`probes`]: the machine probes of 15.10, and the facts every run records.
 //! - [`report`]: Markdown for BENCHMARKS.md.
 //! - [`units`]: rates, durations and latencies as people write and read them.
+//! - [`watch`]: `e2e run --watch`, the live panel and its recording.
 //!
 //! The command line is `src/bin/e2e.rs`: `probe | run | sweep | search | ablate | replay |
 //! recover`.
@@ -43,4 +44,5 @@ pub mod session;
 pub mod summary;
 pub mod sweep;
 pub mod units;
+pub mod watch;
 pub mod workload;

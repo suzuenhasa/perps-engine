@@ -42,10 +42,16 @@ Then run the pipeline end to end:
 # 10k signed orders/s for 10 s, then the same on the Polymarket-shaped flow
 ./dev cargo run --release --locked --offline -p bench --bin e2e -- run --mode signed --rate 10k --window 10s --gateways 2
 ./dev cargo run --release --locked --offline -p bench --bin e2e -- run --mode signed --rate 10k --window 10s --gateways 2 --flow polymarket
+
+# The same with a live panel (needs a terminal of at least 120 x 30), then the journal
+# replay and the signature audit
+./dev cargo run --release --locked --offline -p bench --bin e2e -- run --mode signed --rate 10k --window 30s --gateways 2 --watch --capture --audit
 ```
 
 Each run prints its report: rates, latency per stage and end to end, thread load and a
-verdict (the smoke run also replays its journal and re-checks every signature). On a laptop or VM the
+verdict (the smoke run also replays its journal and re-checks every signature). With
+`--watch` it draws the run live instead (stages, rates, fills, thread load), ends with a
+short result, and records the panel to `watch.jsonl`. On a laptop or VM the
 verdict will usually be INVALID (for example, the sender ran late on a shared CPU): the
 harness refuses to count a run it can't trust. The headline numbers need a dedicated
 machine with enough cores to pin every thread (`docs/RUNBOOK-PERPSBOX.md`). Runs land in

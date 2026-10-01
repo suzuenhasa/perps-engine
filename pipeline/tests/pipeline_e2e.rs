@@ -88,6 +88,7 @@ fn config(dir: &Path, mode: InjectionMode, journal: JournalMode, stamps: Stamps)
         idle: IDLE,
         capture: Some(1 << 20),
         release_log: None,
+        live: false,
         stamps,
         phases: Phases::not_yet(),
         ablation_verify_on_core: None,

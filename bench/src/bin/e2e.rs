@@ -19,7 +19,7 @@
 //! `--max-batch 4096`, `--segment-bytes 1G`, `--stamps on|off`, `--arrivals
 //! poisson|uniform`, `--unpinned`, `--gateway-smt`, `--cpus role=list` (repeatable),
 //! `--idle spin|yield`, `--deployment N`, `--verifier k256|libsecp256k1`, `--auth
-//! perp|eip712`, `--capture`, `--audit`, `--keep-journal`, `--release-log`,
+//! perp|eip712`, `--capture`, `--audit`, `--keep-journal`, `--release-log`, `--watch`,
 //! `--allow-engine-change`, and for development only `--allow-generator-limited` (a late
 //! sender is flagged instead of making the run invalid; the report says so).
 //!
@@ -127,6 +127,7 @@ use bench::e2e::sweep::{
     stamps_points,
 };
 use bench::e2e::units::{SECOND_NS, parse_bytes, parse_duration, parse_rate, parse_rates};
+use bench::e2e::watch;
 use bench::e2e::workload::Workloads;
 use gateway::VerifierKind;
 use loadgen::market_flow::PlanConfig;
@@ -141,8 +142,9 @@ use pipeline::records::{AuthScheme, EVENT_SLOT_WORDS, InjectionMode, Stamps};
 use pipeline::replay::{first_difference, replay};
 
 /// Options that take no value.
-const FLAGS: [&str; 13] = [
+const FLAGS: [&str; 14] = [
     "quick",
+    "watch",
     "resume",
     "release-log",
     "keep-journal",
@@ -360,6 +362,7 @@ fn run_options(args: &Args, default_mode: InjectionMode, default_rate: u64) -> R
     c.audit |= args.flag("audit");
     c.keep_journal |= args.flag("keep-journal") || args.flag("release-log");
     c.release_log = args.flag("release-log");
+    c.watch = args.flag("watch");
     c.resume = args.flag("resume");
     c.allow_engine_change = args.flag("allow-engine-change");
     c.allow_generator_limited = args.flag("allow-generator-limited");
@@ -443,7 +446,17 @@ fn run_command(args: &Args) -> Result<(), String> {
     summary.write(&dir.join("summary.txt")).map_err(|e| e.to_string())?;
     let report = run_report(&summary);
     std::fs::write(dir.join("report.md"), &report).map_err(|e| e.to_string())?;
-    say(args, &report);
+    if config.watch {
+        // The panel's closing lines instead of the report, which stays in its file.
+        eprint!("{}", watch::finish_with_result(&dir, &summary).map_err(|e| e.to_string())?);
+        eprintln!(
+            "\n e2e: the report is {}; the recording {}",
+            dir.join("report.md").display(),
+            dir.join(watch::WATCH_FILE).display()
+        );
+    } else {
+        say(args, &report);
+    }
     if let Some(session) = &session {
         rebuild_report(session)?;
     }
