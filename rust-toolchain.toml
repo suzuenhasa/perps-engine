@@ -1,0 +1,6 @@
+# Pinned to the toolchain baked into docker/dev.Dockerfile, so nothing is downloaded at
+# build time (builds run with no network) and every machine compiles with the same rustc.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

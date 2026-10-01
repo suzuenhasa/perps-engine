@@ -1,0 +1,13 @@
+# Refuse to build on the host (INFO.md 5a, docs/DECISIONS.md D-001).
+#
+# Cargo runs rustc through these scripts, including the compiler probe (`rustc -vV`) at the
+# start of `cargo metadata` that an editor's Rust support performs when it opens the
+# folder. On the host they fail, so no dependency's build script or proc-macro runs there.
+# The containers (and the native benchmark box) set PERPS_IN_CONTAINER=1.
+#
+# Limits: this file only applies to cargo started inside this folder, and the environment
+# overrides it. RUSTC_WRAPPER (sccache, rust-analyzer) replaces the wrapper, which is why
+# the guard also replaces rustc itself; setting RUSTC as well gets past both.
+[build]
+rustc = "tools/host-guard/rustc"
+rustc-wrapper = "tools/host-guard/rustc-wrapper"

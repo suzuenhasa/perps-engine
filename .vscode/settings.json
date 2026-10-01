@@ -1,0 +1,11 @@
+{
+  // Supply-chain guard (INFO.md section 5a): nothing in this workspace is built on the host.
+  // rust-analyzer would otherwise run dependency build scripts and proc-macros here.
+  // The bogus server path stops the language server from starting at all; the other
+  // settings are a second line of defence if it is started some other way.
+  "rust-analyzer.server.path": "/nonexistent/rust-analyzer-disabled-for-this-workspace",
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.checkOnSave": false,
+  "rust-analyzer.cargo.autoreload": false
+}

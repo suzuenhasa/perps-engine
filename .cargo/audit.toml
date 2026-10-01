@@ -1,0 +1,14 @@
+# cargo-audit settings (runs in the `check` container, where the cargo cache is read-only).
+# cargo-audit wants every field of a section it is given.
+[database]
+path = "/advisories/rustsec"
+url = "https://github.com/RustSec/advisory-db.git"
+fetch = true
+stale = false
+
+# cargo-audit can't read cargo's index cache without its lock file, which is read-only
+# here. cargo-deny checks yanked crates instead (deny.toml), from the same cache, which
+# `./dev --write cargo update --dry-run` refreshes (cargo only; the lockfile is untouched).
+[yanked]
+enabled = false
+update_index = false

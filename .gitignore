@@ -1,0 +1,4 @@
+# Build output lives in a Docker volume, but guard against a stray host build.
+/target/
+# Recorded market data: scripts are committed, data never is (INFO.md section 10).
+/data/

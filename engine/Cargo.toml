@@ -1,0 +1,15 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Pure, deterministic exchange logic: order book, risk, liquidation, ledger. No I/O."
+
+# No runtime dependencies on purpose: the engine is plain std Rust.
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

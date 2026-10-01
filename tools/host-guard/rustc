@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stands in for rustc in this project (.cargo/config.toml): refuses on the host, otherwise
+# runs the real rustc. Named `rustc` so clippy-driver still recognises it.
+if [ "${PERPS_IN_CONTAINER:-}" != "1" ]; then
+    echo "perps: refusing to run rustc on the host; build inside ./dev (INFO.md 5a)" >&2
+    exit 1
+fi
+exec rustc "$@"

@@ -1,0 +1,50 @@
+# cargo-deny policy (INFO.md 5a). Run with: ./dev --net cargo deny check
+
+[graph]
+all-features = false
+
+[advisories]
+# Known vulnerabilities, and crates reported as malicious or unmaintained, fail the check.
+yanked = "deny"
+# Its own volume in the `check` container, where the cargo cache is read-only (compose.yaml).
+db-path = "/advisories/deny"
+
+[licenses]
+# Permissive licenses only. webpki-roots ships Mozilla's root list under CDLA-Permissive-2.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Our own crates are unpublished (publish = false) and not license-checked.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Our own crates depend on each other by path without a version; that is not a wildcard
+# on a registry crate.
+allow-wildcard-paths = true
+# Crates kept out on purpose (docs/DECISIONS.md D-006, INFO.md 5a): the aws-lc TLS backend
+# (a large C build), OpenSSL bindings, and `libsecp256k1`, an abandoned lookalike of the
+# maintained `secp256k1`.
+deny = [
+    { crate = "aws-lc-rs" },
+    { crate = "aws-lc-sys" },
+    { crate = "openssl-sys" },
+    { crate = "native-tls" },
+    { crate = "libsecp256k1" },
+]
+
+[sources]
+# crates.io only: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

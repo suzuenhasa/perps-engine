@@ -1,0 +1,22 @@
+[package]
+name = "gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Command decoding, signature verification and backpressure rejects (Milestone 3)."
+
+[dependencies]
+engine.workspace = true
+k256.workspace = true
+pipeline.workspace = true
+secp256k1 = { workspace = true, optional = true }
+
+[features]
+# Opt-in: verify with Bitcoin Core's libsecp256k1 (C) as well as k256. Off by default.
+# `recovery` compiles libsecp256k1's public-key recovery module too, for the EIP-712 scheme
+# (docs/DECISIONS.md D-033); it adds no crate, so Cargo.lock doesn't change.
+c-secp256k1 = ["dep:secp256k1", "secp256k1/recovery"]
+
+[lints]
+workspace = true

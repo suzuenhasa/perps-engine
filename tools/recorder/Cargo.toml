@@ -1,0 +1,20 @@
+[package]
+name = "recorder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Records Polymarket Perps' public WebSocket market data to hourly files."
+
+[[bin]]
+name = "recorder"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+rustls.workspace = true
+futures-util.workspace = true
+
+[lints]
+workspace = true

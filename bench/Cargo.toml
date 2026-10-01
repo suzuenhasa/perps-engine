@@ -1,0 +1,47 @@
+[package]
+name = "bench"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Criterion microbenchmarks and (Milestone 3) the end-to-end harness and report generation."
+
+[dependencies]
+engine.workspace = true
+loadgen.workspace = true
+pipeline.workspace = true
+gateway.workspace = true
+k256.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[features]
+# Opt-in: build the harness with the libsecp256k1 verifier available (gateway feature).
+c-secp256k1 = ["gateway/c-secp256k1"]
+
+[[bench]]
+name = "book"
+harness = false
+
+# The risk layer (Milestone 2, docs/RISK.md 14.4): one target per measurement, so that each
+# can run alone with `--bench <name>` without building the others' engines.
+[[bench]]
+name = "ablation_a"
+harness = false
+
+[[bench]]
+name = "ablation_b"
+harness = false
+
+[[bench]]
+name = "risk_cost"
+harness = false
+
+# The pipeline's parts, one at a time (Milestone 3, docs/PIPELINE.md 15.10 and 19.1).
+[[bench]]
+name = "pipeline_parts"
+harness = false
+
+[lints]
+workspace = true

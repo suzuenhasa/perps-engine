@@ -1,0 +1,3 @@
+# Keep short expressions on one line when they fit, so code reads compactly aloud.
+max_width = 110
+use_small_heuristics = "Max"

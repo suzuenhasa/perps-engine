@@ -1,0 +1,11187 @@
+{
+ "what": "Polymarket Perps maker book shape: calibration parameters for a seeded synthetic flow generator (Task B)",
+ "generated_utc": "2026-09-30",
+ "sample": {
+  "core_hours_utc": [
+   {
+    "hour": "2026-09-30T13",
+    "role": "busy (most trades of 21 full hours; contains the 13:30 UTC US cash open)",
+    "trade_records": 6263
+   },
+   {
+    "hour": "2026-09-30T10",
+    "role": "median (11th of 21 by trade records)",
+    "trade_records": 2220
+   },
+   {
+    "hour": "2026-09-29T20",
+    "role": "quiet (fewest trades of 21 full hours; first hour after the US cash close)",
+    "trade_records": 1315
+   }
+  ],
+  "all21_hours_utc": [
+   "2026-09-29T16",
+   "2026-09-29T19",
+   "2026-09-29T20",
+   "2026-09-29T21",
+   "2026-09-29T22",
+   "2026-09-29T23",
+   "2026-09-30T00",
+   "2026-09-30T01",
+   "2026-09-30T02",
+   "2026-09-30T03",
+   "2026-09-30T04",
+   "2026-09-30T05",
+   "2026-09-30T06",
+   "2026-09-30T07",
+   "2026-09-30T08",
+   "2026-09-30T09",
+   "2026-09-30T10",
+   "2026-09-30T11",
+   "2026-09-30T12",
+   "2026-09-30T13",
+   "2026-09-30T14"
+  ],
+  "hour_selection_method": "full hours only (2026-09-29T14, T17, T18 partial/empty and T15 has a recorder restart; 2026-09-30T15 still recording); ranked by count of trade records in trades:: frames (settlement=false; no settlement trades were seen)",
+  "which_sample_for_what": "Book shape (spread, gaps, levels, distance, depth, dust, repeats) from the 3 core hours = 950,488 snapshots x up to 40 levels. Requote vs trades per market and the per-hour robustness table from all 21 full hours (the thin markets have few trades per hour).",
+  "book_source": "book::<iid> frames: 20-level snapshots (both sides), recorder keeps the last frame of each server-time second, so 1 snapshot per market per second (checked: consecutive snapshots are exactly 1000 ms apart in ets). Only the top 20 levels per side are visible.",
+  "per_market_counts_core3": "each market has ~10,800 snapshots (3 x 3600); pooled statistics weight markets equally in time"
+ },
+ "units_and_conversions": {
+  "engine": "price in ticks of 10^-pd USD, size in lots of 10^-qd units, pd+qd=6 so ticks x lots = micro-dollars (docs/DECISIONS.md D-004)",
+  "real_tick_rule": "real_tick_engine_ticks = 10^max(0, digits(price_ticks) - 5)  (5 significant figures; equivalent to max(10^-pd, 10^(floor(log10 price) - 4)) USD)",
+  "real_tick_rule_check": "core3: 0 share of 35,043,924 visible levels off this grid; every spread and every level gap is an integer number of real ticks",
+  "real_tick_bps": "real_tick_usd / mid * 1e4; ranges 0.10-2.3 bps across the 88 markets, so a spread or gap in real ticks is NOT comparable across markets without it",
+  "bps_to_ticks": "ticks = max(1, round(bps / real_tick_bps)) then engine ticks = ticks * real_tick_engine_ticks",
+  "usd_to_lots": "lots = round(USD * 1e6 / price_ticks)"
+ },
+ "classes": {
+  "rule": {
+   "majors": "BTC-USD, ETH-USD, SOL-USD",
+   "alt_crypto": "category=crypto, not a major, max_leverage >= 10 (exchange tier max_market_notional 500k or 1M)",
+   "longtail_crypto": "category=crypto, max_leverage <= 5 (exchange tier max_market_notional 50k)",
+   "tradfi": "category in {equity, index, commodity}; supplementary split tradfi_macro = SP500, NAS100, GOLD, SILVER, WTIOIL, BRENTOIL and tradfi_equities = the other 42"
+  },
+  "why": "Majors are tick-bound (1-tick spread). The two crypto classes follow the exchange's own leverage tiers and differ in depth and dust. Tradfi books are deeper (fixed $25k/$50k/$100k clips), but about half of their seconds see no requote. In the macro sub-class, SP500, NAS100 and GOLD are tick-bound like the majors, and all six are much deeper than single stocks; use it where a flow needs it."
+ },
+ "overall": {
+  "n_markets": 88,
+  "markets": [
+   "SP500-USD",
+   "GOLD-USD",
+   "WTIOIL-USD",
+   "NAS100-USD",
+   "SILVER-USD",
+   "BTC-USD",
+   "ETH-USD",
+   "SOL-USD",
+   "SPCX-USD",
+   "HYPE-USD",
+   "MU-USD",
+   "SKHY-USD",
+   "SKHYNIX-USD",
+   "AAPL-USD",
+   "MSFT-USD",
+   "GOOG-USD",
+   "AMZN-USD",
+   "NVDA-USD",
+   "META-USD",
+   "TSLA-USD",
+   "AMD-USD",
+   "INTC-USD",
+   "AVGO-USD",
+   "QCOM-USD",
+   "ARM-USD",
+   "TSM-USD",
+   "ASML-USD",
+   "SNDK-USD",
+   "DRAM-USD",
+   "PUMP-USD",
+   "ZEC-USD",
+   "XRP-USD",
+   "LIT-USD",
+   "KPEPE-USD",
+   "HOOD-USD",
+   "MSTR-USD",
+   "STRC-USD",
+   "CRCL-USD",
+   "COIN-USD",
+   "RKLB-USD",
+   "LITE-USD",
+   "NBIS-USD",
+   "ORCL-USD",
+   "PLTR-USD",
+   "BRENTOIL-USD",
+   "BABA-USD",
+   "ZM-USD",
+   "DELL-USD",
+   "CXMT-USD",
+   "SAMSUNG-USD",
+   "CRWV-USD",
+   "AAVE-USD",
+   "UNI-USD",
+   "WLD-USD",
+   "NEAR-USD",
+   "KSHIB-USD",
+   "FARTCOIN-USD",
+   "DOGE-USD",
+   "ENA-USD",
+   "ONDO-USD",
+   "SUI-USD",
+   "VVV-USD",
+   "TAO-USD",
+   "ADA-USD",
+   "ZRO-USD",
+   "BNB-USD",
+   "PONS-USD",
+   "CASHCAT-USD",
+   "USELESS-USD",
+   "KAITO-USD",
+   "ARB-USD",
+   "LDO-USD",
+   "AVAX-USD",
+   "LTC-USD",
+   "XPL-USD",
+   "XMR-USD",
+   "LINK-USD",
+   "VIRTUAL-USD",
+   "JUP-USD",
+   "ETHFI-USD",
+   "PENDLE-USD",
+   "MORPHO-USD",
+   "CBRS-USD",
+   "MRVL-USD",
+   "EWY-USD",
+   "NCLD-USD",
+   "SOXL-USD",
+   "UNITREE-USD"
+  ],
+  "sample_core3": {
+   "book_snapshots": 950488,
+   "levels": 35043924
+  },
+  "real_tick_bps": {
+   "p10": 0.117,
+   "p50": 0.367,
+   "p90": 0.853
+  },
+  "spread": {
+   "real_ticks": {
+    "p10": 2.0,
+    "p25": 6.0,
+    "p50": 11.0,
+    "p75": 24.0,
+    "p90": 40.0,
+    "p99": 240.0,
+    "mean": 25.9,
+    "pmf": {
+     "1": 0.0924,
+     "2": 0.0147,
+     "3": 0.0262,
+     "4": 0.0381,
+     "5": 0.0461,
+     "6": 0.0565,
+     "7": 0.0566,
+     "8": 0.0494,
+     "9": 0.0467,
+     "10": 0.0455,
+     "11": 0.0352,
+     "12": 0.0343,
+     ">12": 0.458
+    }
+   },
+   "bps": {
+    "p10": 0.965,
+    "p25": 3.14,
+    "p50": 4.53,
+    "p75": 5.76,
+    "p90": 7.11,
+    "p99": 101.0,
+    "ln_mean": 1.268,
+    "ln_sd": 1.04
+   },
+   "market_median_bps_across_markets": {
+    "p10": 2.51,
+    "p50": 4.6,
+    "p90": 6.18,
+    "min": 0.119,
+    "max": 107.0
+   },
+   "market_median_real_ticks_across_markets": {
+    "p10": 4.7,
+    "p50": 12.0,
+    "p90": 39.3,
+    "min": 1.0,
+    "max": 254.0
+   }
+  },
+  "gap_between_levels": {
+   "real_ticks_all_levels": {
+    "p25": 1.0,
+    "p50": 2.0,
+    "p75": 9.0,
+    "p90": 46.0,
+    "p95": 222.0,
+    "p99": 7512.0,
+    "mean": 252.0,
+    "pmf": {
+     "1": 0.379,
+     "2": 0.124,
+     "3": 0.0738,
+     "4": 0.0513,
+     "5": 0.0383,
+     "6": 0.0318,
+     "7": 0.0241,
+     "8": 0.0201,
+     "9": 0.0161,
+     "10": 0.0143,
+     ">10": 0.227
+    }
+   },
+   "bps_all_levels": {
+    "p10": 0.199,
+    "p25": 0.406,
+    "p50": 0.89,
+    "p75": 2.91,
+    "p90": 14.1,
+    "p99": 3670.0
+   },
+   "by_level_index": {
+    "1-4": {
+     "ticks_pmf": {
+      "1": 0.548,
+      "2": 0.128,
+      "3": 0.0744,
+      "4": 0.0497,
+      "5": 0.0347,
+      "6": 0.0263,
+      "7": 0.0204,
+      "8": 0.0163,
+      "9": 0.0131,
+      "10": 0.0107,
+      ">10": 0.0785
+     },
+     "ticks_p50": 1.0,
+     "ticks_p75": 3.0,
+     "ticks_p90": 9.0,
+     "ticks_p95": 15.0,
+     "ticks_p99": 36.0,
+     "bps_p10": 0.163,
+     "bps_p50": 0.659,
+     "bps_p90": 2.42,
+     "bps_ln_mean": -0.3978,
+     "bps_ln_sd": 1.07
+    },
+    "5-9": {
+     "ticks_pmf": {
+      "1": 0.456,
+      "2": 0.134,
+      "3": 0.0733,
+      "4": 0.0498,
+      "5": 0.0374,
+      "6": 0.0311,
+      "7": 0.0218,
+      "8": 0.0198,
+      "9": 0.014,
+      "10": 0.0127,
+      ">10": 0.15
+     },
+     "ticks_p50": 2.0,
+     "ticks_p75": 5.0,
+     "ticks_p90": 17.0,
+     "ticks_p95": 41.0,
+     "ticks_p99": 3483.0,
+     "bps_p10": 0.185,
+     "bps_p50": 0.744,
+     "bps_p90": 5.11,
+     "bps_ln_mean": -0.02578,
+     "bps_ln_sd": 1.58
+    },
+    "10-19": {
+     "ticks_pmf": {
+      "1": 0.256,
+      "2": 0.116,
+      "3": 0.0738,
+      "4": 0.0528,
+      "5": 0.0406,
+      "6": 0.0348,
+      "7": 0.0272,
+      "8": 0.022,
+      "9": 0.0187,
+      "10": 0.017,
+      ">10": 0.341
+     },
+     "ticks_p50": 5.0,
+     "ticks_p75": 20.0,
+     "ticks_p90": 164.0,
+     "ticks_p95": 713.0,
+     "ticks_p99": 10370.0,
+     "bps_p10": 0.238,
+     "bps_p50": 1.58,
+     "bps_p90": 55.5,
+     "bps_ln_mean": 0.9215,
+     "bps_ln_sd": 2.26
+    }
+   },
+   "market_median_gap_bps_across_markets": {
+    "p10": 0.302,
+    "p50": 1.08,
+    "p90": 3.63
+   }
+  },
+  "levels_per_side": {
+   "share_20": 0.734,
+   "share_lt10": 0.0387,
+   "share_0": 6.944e-05,
+   "p10": 13.0,
+   "p50": 20.0,
+   "mean": 18.4
+  },
+  "distance_from_mid_bps_by_level": {
+   "1": {
+    "p10": 0.482,
+    "p25": 1.57,
+    "p50": 2.27,
+    "p75": 2.88,
+    "p90": 3.55
+   },
+   "2": {
+    "p10": 1.53,
+    "p25": 2.51,
+    "p50": 3.24,
+    "p75": 4.01,
+    "p90": 5.04
+   },
+   "3": {
+    "p10": 2.15,
+    "p25": 3.13,
+    "p50": 3.99,
+    "p75": 5.04,
+    "p90": 7.06
+   },
+   "5": {
+    "p10": 3.08,
+    "p25": 4.18,
+    "p50": 5.47,
+    "p75": 7.49,
+    "p90": 12.4
+   },
+   "10": {
+    "p10": 5.03,
+    "p25": 7.36,
+    "p50": 11.2,
+    "p75": 16.9,
+    "p90": 32.5
+   },
+   "15": {
+    "p10": 7.38,
+    "p25": 10.9,
+    "p50": 18.7,
+    "p75": 33.6,
+    "p90": 161.0
+   },
+   "20": {
+    "p10": 9.65,
+    "p25": 14.7,
+    "p50": 31.5,
+    "p75": 83.7,
+    "p90": 437.0
+   }
+  },
+  "depth_usd": {
+   "all_levels_pooled": {
+    "p5": 11.1,
+    "p10": 30.6,
+    "p25": 1010.0,
+    "p50": 10100.0,
+    "p75": 50900.0,
+    "p90": 117000.0,
+    "p95": 200000.0,
+    "p99": 559000.0,
+    "ln_mean": 8.644,
+    "ln_sd": 2.92
+   },
+   "all_levels_pooled_excluding_dust": {
+    "p5": 159.0,
+    "p10": 298.0,
+    "p25": 3110.0,
+    "p50": 14800.0,
+    "p75": 53600.0,
+    "p90": 131000.0,
+    "p95": 202000.0,
+    "p99": 598000.0
+   },
+   "by_level_index": {
+    "1": {
+     "p10": 233.0,
+     "p50": 1170.0,
+     "p90": 25300.0,
+     "dust_share": 0.0526,
+     "nondust_ln_mean": 7.619,
+     "nondust_ln_sd": 1.91
+    },
+    "2": {
+     "p10": 258.0,
+     "p50": 7170.0,
+     "p90": 82600.0,
+     "dust_share": 0.0249,
+     "nondust_ln_mean": 8.68,
+     "nondust_ln_sd": 2.13
+    },
+    "3": {
+     "p10": 319.0,
+     "p50": 17800.0,
+     "p90": 128000.0,
+     "dust_share": 0.0272,
+     "nondust_ln_mean": 9.534,
+     "nondust_ln_sd": 2.07
+    },
+    "4": {
+     "p10": 495.0,
+     "p50": 25000.0,
+     "p90": 151000.0,
+     "dust_share": 0.0341,
+     "nondust_ln_mean": 9.84,
+     "nondust_ln_sd": 2.03
+    },
+    "5": {
+     "p10": 314.0,
+     "p50": 24700.0,
+     "p90": 175000.0,
+     "dust_share": 0.049,
+     "nondust_ln_mean": 9.877,
+     "nondust_ln_sd": 2.03
+    },
+    "6": {
+     "p10": 251.0,
+     "p50": 20100.0,
+     "p90": 177000.0,
+     "dust_share": 0.0717,
+     "nondust_ln_mean": 9.896,
+     "nondust_ln_sd": 1.97
+    },
+    "7": {
+     "p10": 114.0,
+     "p50": 16000.0,
+     "p90": 176000.0,
+     "dust_share": 0.0839,
+     "nondust_ln_mean": 9.824,
+     "nondust_ln_sd": 2.03
+    },
+    "8": {
+     "p10": 21.0,
+     "p50": 14800.0,
+     "p90": 174000.0,
+     "dust_share": 0.0968,
+     "nondust_ln_mean": 9.777,
+     "nondust_ln_sd": 2.05
+    },
+    "9": {
+     "p10": 15.1,
+     "p50": 12500.0,
+     "p90": 151000.0,
+     "dust_share": 0.0995,
+     "nondust_ln_mean": 9.661,
+     "nondust_ln_sd": 2.08
+    },
+    "10": {
+     "p10": 11.5,
+     "p50": 10100.0,
+     "p90": 127000.0,
+     "dust_share": 0.104,
+     "nondust_ln_mean": 9.508,
+     "nondust_ln_sd": 2.11
+    },
+    "11": {
+     "p10": 11.3,
+     "p50": 9360.0,
+     "p90": 102000.0,
+     "dust_share": 0.115,
+     "nondust_ln_mean": 9.376,
+     "nondust_ln_sd": 2.12
+    },
+    "12": {
+     "p10": 11.3,
+     "p50": 8080.0,
+     "p90": 102000.0,
+     "dust_share": 0.12,
+     "nondust_ln_mean": 9.26,
+     "nondust_ln_sd": 2.16
+    },
+    "13": {
+     "p10": 11.3,
+     "p50": 7950.0,
+     "p90": 101000.0,
+     "dust_share": 0.125,
+     "nondust_ln_mean": 9.169,
+     "nondust_ln_sd": 2.24
+    },
+    "14": {
+     "p10": 11.3,
+     "p50": 7110.0,
+     "p90": 101000.0,
+     "dust_share": 0.129,
+     "nondust_ln_mean": 9.127,
+     "nondust_ln_sd": 2.26
+    },
+    "15": {
+     "p10": 11.3,
+     "p50": 6890.0,
+     "p90": 101000.0,
+     "dust_share": 0.129,
+     "nondust_ln_mean": 9.09,
+     "nondust_ln_sd": 2.32
+    },
+    "16": {
+     "p10": 11.3,
+     "p50": 6570.0,
+     "p90": 102000.0,
+     "dust_share": 0.131,
+     "nondust_ln_mean": 9.045,
+     "nondust_ln_sd": 2.38
+    },
+    "17": {
+     "p10": 11.3,
+     "p50": 7450.0,
+     "p90": 102000.0,
+     "dust_share": 0.13,
+     "nondust_ln_mean": 9.049,
+     "nondust_ln_sd": 2.41
+    },
+    "18": {
+     "p10": 11.3,
+     "p50": 7950.0,
+     "p90": 102000.0,
+     "dust_share": 0.125,
+     "nondust_ln_mean": 9.006,
+     "nondust_ln_sd": 2.44
+    },
+    "19": {
+     "p10": 11.4,
+     "p50": 7970.0,
+     "p90": 102000.0,
+     "dust_share": 0.119,
+     "nondust_ln_mean": 8.932,
+     "nondust_ln_sd": 2.49
+    },
+    "20": {
+     "p10": 11.4,
+     "p50": 7720.0,
+     "p90": 101000.0,
+     "dust_share": 0.113,
+     "nondust_ln_mean": 8.849,
+     "nondust_ln_sd": 2.52
+    }
+   },
+   "median_vs_level_powerlaw_beta": 0.105,
+   "cumulative_to_level": {
+    "1": {
+     "p10": 233.0,
+     "p50": 1170.0,
+     "p90": 25300.0
+    },
+    "5": {
+     "p10": 20800.0,
+     "p50": 152000.0,
+     "p90": 535000.0
+    },
+    "10": {
+     "p10": 74500.0,
+     "p50": 343000.0,
+     "p90": 1330000.0
+    },
+    "20": {
+     "p10": 228000.0,
+     "p50": 821000.0,
+     "p90": 2300000.0
+    }
+   },
+   "market_median_depth_across_markets": {
+    "p10": 1520.0,
+    "p50": 9390.0,
+    "p90": 54100.0,
+    "lognormal_mu": 9.243,
+    "lognormal_sigma": 1.45
+   },
+   "model_A_dust_plus_lognormal_mixture": {
+    "dust_point_mass_share": 0.0916,
+    "dust_range_usd": [
+     10,
+     12.5
+    ],
+    "n_components": 3,
+    "lognormal_mixture_non_dust": [
+     {
+      "weight": 0.306,
+      "mu_ln_usd": 6.651,
+      "sigma_ln": 1.68,
+      "median_usd": 774.0
+     },
+     {
+      "weight": 0.0682,
+      "mu_ln_usd": 8.756,
+      "sigma_ln": 0.05,
+      "median_usd": 6350.0
+     },
+     {
+      "weight": 0.626,
+      "mu_ln_usd": 10.61,
+      "sigma_ln": 1.21,
+      "median_usd": 40600.0
+     }
+    ],
+    "fit_check_p10_p25_p50_p75_p90": [
+     32.9,
+     1030.0,
+     11400.0,
+     49200.0,
+     125000.0
+    ],
+    "empirical_p10_p25_p50_p75_p90": [
+     30.6,
+     1010.0,
+     10100.0,
+     50900.0,
+     117000.0
+    ],
+    "max_abs_log_error": 0.121
+   },
+   "model_B_dust_plus_clip_menu_plus_background": {
+    "dust_share": 0.0916,
+    "clips": [
+     {
+      "usd": 260.0,
+      "window_usd": [
+       240,
+       282
+      ],
+      "share": 0.0277,
+      "n_markets": 86
+     },
+     {
+      "usd": 6000.0,
+      "window_usd": [
+       5495,
+       6457
+      ],
+      "share": 0.0742,
+      "n_markets": 88
+     },
+     {
+      "usd": 8000.0,
+      "window_usd": [
+       7413,
+       8710
+      ],
+      "share": 0.0279,
+      "n_markets": 87
+     },
+     {
+      "usd": 9900.0,
+      "window_usd": [
+       9120,
+       10715
+      ],
+      "share": 0.0302,
+      "n_markets": 86
+     },
+     {
+      "usd": 15700.0,
+      "window_usd": [
+       14454,
+       16982
+      ],
+      "share": 0.0327,
+      "n_markets": 79
+     },
+     {
+      "usd": 25400.0,
+      "window_usd": [
+       23442,
+       27542
+      ],
+      "share": 0.0384,
+      "n_markets": 79
+     },
+     {
+      "usd": 40300.0,
+      "window_usd": [
+       37154,
+       43652
+      ],
+      "share": 0.0267,
+      "n_markets": 77
+     },
+     {
+      "usd": 50700.0,
+      "window_usd": [
+       46774,
+       54954
+      ],
+      "share": 0.0728,
+      "n_markets": 79
+     },
+     {
+      "usd": 80400.0,
+      "window_usd": [
+       74131,
+       87096
+      ],
+      "share": 0.0266,
+      "n_markets": 72
+     },
+     {
+      "usd": 105900.0,
+      "window_usd": [
+       97724,
+       114815
+      ],
+      "share": 0.0511,
+      "n_markets": 71
+     }
+    ],
+    "clip_total_share": 0.4083,
+    "background_share": 0.5,
+    "background_lognormal": {
+     "mu_ln_usd": 8.856,
+     "sigma_ln": 2.627,
+     "median_usd": 7015
+    }
+   }
+  },
+  "dust_layer": {
+   "share_levels_10_to_12p5_usd": 0.0916,
+   "share_levels_below_10_usd": 0.000325,
+   "share_by_level_k": {
+    "1": 0.0526,
+    "2": 0.0249,
+    "3": 0.0272,
+    "5": 0.049,
+    "10": 0.104,
+    "15": 0.129,
+    "20": 0.113
+   },
+   "dist_from_mid_bps": {
+    "p10": 7.8,
+    "p25": 13.3,
+    "p50": 21.3,
+    "p75": 29.4,
+    "p90": 37.9
+   },
+   "share_of_dust_levels_repeating_a_size_same_side": 0.858
+  },
+  "size_repeats": {
+   "share_levels_size_repeated_same_side": 0.348,
+   "share_nondust_levels_size_repeated_same_side": 0.296,
+   "share_levels_size_appears_on_other_side": 0.386,
+   "share_levels_in_adjacent_identical_run": 0.176,
+   "share_levels_in_adjacent_identical_run_nondust": 0.151,
+   "share_levels_size_is_2to5x_another_level_same_side": 0.0556,
+   "multiplicity_share_of_levels": {
+    "1": 0.652,
+    "2": 0.124,
+    "3": 0.11,
+    "4+": 0.115
+   },
+   "adjacent_runs_per_side_snapshot": {
+    "2": 0.837,
+    "3": 0.394,
+    "4": 0.048,
+    "5+": 0.0351
+   },
+   "adjacent_runs_per_side_snapshot_nondust": {
+    "2": 0.698,
+    "3": 0.331,
+    "4": 0.0479,
+    "5+": 0.0351
+   }
+  },
+  "requote_1s_lower_bound": {
+   "core3": {
+    "level_changes_nonfill_per_s": 10.6,
+    "level_changes_incl_fill_per_s": 10.6,
+    "naive_window_changes_per_s": 12.0,
+    "mix": {
+     "add": 0.377,
+     "remove": 0.376,
+     "size_up": 0.124,
+     "size_down": 0.123
+    },
+    "by_level_bucket_share": {
+     "1-5": 0.501,
+     "6-10": 0.283,
+     "11-20": 0.216
+    },
+    "trades_per_s": 0.0103,
+    "n_trades": 9789,
+    "nonfill_changes_per_trade": 1030.0,
+    "cancel_like_changes_per_trade": 514.3,
+    "share_seconds_no_level_change": 0.32,
+    "share_seconds_best_price_moved": 0.403,
+    "nonfill_changes_in_one_second_quantiles": {
+     "p10": 0.0,
+     "p50": 5.0,
+     "p90": 31.0,
+     "p99": 51.0
+    },
+    "nonfill_changes_in_one_second_pmf_buckets": {
+     "0": 0.32,
+     "1-2": 0.104,
+     "3-5": 0.0964,
+     "6-10": 0.122,
+     "11-20": 0.151,
+     "21-40": 0.163,
+     "41+": 0.0435
+    },
+    "share_trades_at_price_resting_in_prev_snapshot": 0.782
+   },
+   "all21": {
+    "level_changes_nonfill_per_s": 9.14,
+    "mix": {
+     "add": 0.366,
+     "remove": 0.366,
+     "size_up": 0.134,
+     "size_down": 0.134
+    },
+    "by_level_bucket_share": {
+     "1-5": 0.52,
+     "6-10": 0.277,
+     "11-20": 0.203
+    },
+    "trades_per_s": 0.00851,
+    "n_trades": 56602,
+    "nonfill_changes_per_trade": 1074.0,
+    "cancel_like_changes_per_trade": 536.8,
+    "share_seconds_no_level_change": 0.34,
+    "nonfill_changes_in_one_second_pmf_buckets": {
+     "0": 0.34,
+     "1-2": 0.11,
+     "3-5": 0.103,
+     "6-10": 0.13,
+     "11-20": 0.151,
+     "21-40": 0.137,
+     "41+": 0.0282
+    }
+   },
+   "class_total_per_s_core3": {
+    "nonfill_level_changes": 932.8,
+    "trades": 0.9064
+   },
+   "class_total_per_s_all21": {
+    "nonfill_level_changes": 804.3,
+    "trades": 0.7489
+   },
+   "per_market_nonfill_changes_per_s_across_markets_all21": {
+    "p10": 2.98,
+    "p50": 8.21,
+    "p90": 16.0,
+    "min": 0.456,
+    "max": 23.9,
+    "lognormal_mu": 1.999,
+    "lognormal_sigma": 0.725
+   },
+   "per_market_trades_per_s_across_markets_all21": {
+    "n_markets": 88,
+    "p10": 0.000558,
+    "p50": 0.00357,
+    "p90": 0.0214,
+    "min": 9.27e-05,
+    "max": 0.0793,
+    "lognormal_mu": -5.678,
+    "lognormal_sigma": 1.4
+   },
+   "per_market_nonfill_changes_per_trade_across_markets_all21": {
+    "n_markets": 88,
+    "p10": 617.0,
+    "p50": 2370.0,
+    "p90": 8400.0,
+    "min": 112.0,
+    "max": 38100.0,
+    "lognormal_mu": 7.677,
+    "lognormal_sigma": 1.19
+   }
+  }
+ },
+ "by_class": {
+  "majors": {
+   "n_markets": 3,
+   "markets": [
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 32403,
+    "levels": 1296016
+   },
+   "real_tick_bps": {
+    "p10": 0.118,
+    "p50": 0.37,
+    "p90": 0.842
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 1.0,
+     "p25": 1.0,
+     "p50": 1.0,
+     "p75": 1.0,
+     "p90": 4.0,
+     "p99": 24.0,
+     "mean": 2.12,
+     "pmf": {
+      "1": 0.861,
+      "2": 0.0123,
+      "3": 0.0197,
+      "4": 0.019,
+      "5": 0.0147,
+      "6": 0.0124,
+      "7": 0.00849,
+      "8": 0.00704,
+      "9": 0.00454,
+      "10": 0.00259,
+      "11": 0.00339,
+      "12": 0.00296,
+      ">12": 0.0319
+     }
+    },
+    "bps": {
+     "p10": 0.118,
+     "p25": 0.12,
+     "p50": 0.375,
+     "p75": 0.84,
+     "p90": 1.81,
+     "p99": 4.97,
+     "ln_mean": -0.8402,
+     "ln_sd": 1.03
+    },
+    "market_median_bps_across_markets": {
+     "p10": 0.17,
+     "p50": 0.372,
+     "p90": 0.747,
+     "min": 0.119,
+     "max": 0.841
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 1.0,
+     "p50": 1.0,
+     "p90": 1.0,
+     "min": 1.0,
+     "max": 1.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 1.0,
+     "p50": 1.0,
+     "p75": 2.0,
+     "p90": 4.0,
+     "p95": 6.0,
+     "p99": 12.0,
+     "mean": 2.49,
+     "pmf": {
+      "1": 0.609,
+      "2": 0.184,
+      "3": 0.0804,
+      "4": 0.0434,
+      "5": 0.0271,
+      "6": 0.0158,
+      "7": 0.0111,
+      "8": 0.0074,
+      "9": 0.00511,
+      "10": 0.0033,
+      ">10": 0.0133
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.119,
+     "p25": 0.355,
+     "p50": 0.6,
+     "p75": 0.843,
+     "p90": 1.67,
+     "p99": 5.86
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.6,
+       "2": 0.17,
+       "3": 0.0844,
+       "4": 0.0493,
+       "5": 0.0301,
+       "6": 0.0187,
+       "7": 0.0137,
+       "8": 0.00936,
+       "9": 0.0062,
+       "10": 0.00438,
+       ">10": 0.0134
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 2.0,
+      "ticks_p90": 4.0,
+      "ticks_p95": 6.0,
+      "ticks_p99": 12.0,
+      "bps_p10": 0.119,
+      "bps_p50": 0.745,
+      "bps_p90": 1.41,
+      "bps_ln_mean": -0.6356,
+      "bps_ln_sd": 0.803
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.719,
+       "2": 0.16,
+       "3": 0.0552,
+       "4": 0.0274,
+       "5": 0.0154,
+       "6": 0.00946,
+       "7": 0.00545,
+       "8": 0.00311,
+       "9": 0.002,
+       "10": 0.000855,
+       ">10": 0.0016
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 2.0,
+      "ticks_p90": 3.0,
+      "ticks_p95": 4.0,
+      "ticks_p99": 7.0,
+      "bps_p10": 0.119,
+      "bps_p50": 0.376,
+      "bps_p90": 0.849,
+      "bps_ln_mean": -0.8227,
+      "bps_ln_sd": 0.779
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.558,
+       "2": 0.201,
+       "3": 0.0914,
+       "4": 0.049,
+       "5": 0.0318,
+       "6": 0.0178,
+       "7": 0.0128,
+       "8": 0.00876,
+       "9": 0.00623,
+       "10": 0.00409,
+       ">10": 0.0192
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 2.0,
+      "ticks_p90": 5.0,
+      "ticks_p95": 7.0,
+      "ticks_p99": 19.0,
+      "bps_p10": 0.119,
+      "bps_p50": 0.735,
+      "bps_p90": 2.2,
+      "bps_ln_mean": -0.5866,
+      "bps_ln_sd": 1.09
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 0.171,
+     "p50": 0.377,
+     "p90": 0.75
+    }
+   },
+   "levels_per_side": {
+    "share_20": 0.999,
+    "share_lt10": 0,
+    "share_0": 0,
+    "p10": 20.0,
+    "p50": 20.0,
+    "mean": 20.0
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 0.0591,
+     "p25": 0.06,
+     "p50": 0.185,
+     "p75": 0.421,
+     "p90": 0.895
+    },
+    "2": {
+     "p10": 0.18,
+     "p25": 0.554,
+     "p50": 1.24,
+     "p75": 1.68,
+     "p90": 2.35
+    },
+    "3": {
+     "p10": 0.419,
+     "p25": 1.12,
+     "p50": 2.05,
+     "p75": 2.8,
+     "p90": 3.35
+    },
+    "5": {
+     "p10": 1.14,
+     "p25": 2.06,
+     "p50": 3.13,
+     "p75": 4.11,
+     "p90": 4.92
+    },
+    "10": {
+     "p10": 2.6,
+     "p25": 3.47,
+     "p50": 5.3,
+     "p75": 8.76,
+     "p90": 10.4
+    },
+    "15": {
+     "p10": 3.49,
+     "p25": 4.4,
+     "p50": 8.85,
+     "p75": 14.2,
+     "p90": 16.3
+    },
+    "20": {
+     "p10": 4.58,
+     "p25": 5.76,
+     "p50": 14.1,
+     "p75": 21.7,
+     "p90": 30.0
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 191.0,
+     "p10": 1330.0,
+     "p25": 3150.0,
+     "p50": 12300.0,
+     "p75": 50500.0,
+     "p90": 130000.0,
+     "p95": 172000.0,
+     "p99": 264000.0,
+     "ln_mean": 9.267,
+     "ln_sd": 2.08
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 891.0,
+     "p10": 1560.0,
+     "p25": 3600.0,
+     "p50": 12600.0,
+     "p75": 50800.0,
+     "p90": 131000.0,
+     "p95": 172000.0,
+     "p99": 265000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 895.0,
+      "p50": 2920.0,
+      "p90": 15100.0,
+      "dust_share": 0.00772,
+      "nondust_ln_mean": 8.023,
+      "nondust_ln_sd": 1.28
+     },
+     "2": {
+      "p10": 881.0,
+      "p50": 2620.0,
+      "p90": 30700.0,
+      "dust_share": 0.00378,
+      "nondust_ln_mean": 8.223,
+      "nondust_ln_sd": 1.37
+     },
+     "3": {
+      "p10": 1320.0,
+      "p50": 3930.0,
+      "p90": 31600.0,
+      "dust_share": 0.00318,
+      "nondust_ln_mean": 8.544,
+      "nondust_ln_sd": 1.35
+     },
+     "4": {
+      "p10": 1540.0,
+      "p50": 7160.0,
+      "p90": 48400.0,
+      "dust_share": 0.00239,
+      "nondust_ln_mean": 8.899,
+      "nondust_ln_sd": 1.51
+     },
+     "5": {
+      "p10": 1720.0,
+      "p50": 11100.0,
+      "p90": 102000.0,
+      "dust_share": 0.00235,
+      "nondust_ln_mean": 9.234,
+      "nondust_ln_sd": 1.63
+     },
+     "6": {
+      "p10": 1820.0,
+      "p50": 13200.0,
+      "p90": 131000.0,
+      "dust_share": 0.00316,
+      "nondust_ln_mean": 9.448,
+      "nondust_ln_sd": 1.7
+     },
+     "7": {
+      "p10": 1720.0,
+      "p50": 14900.0,
+      "p90": 152000.0,
+      "dust_share": 0.00611,
+      "nondust_ln_mean": 9.542,
+      "nondust_ln_sd": 1.74
+     },
+     "8": {
+      "p10": 1710.0,
+      "p50": 15300.0,
+      "p90": 148000.0,
+      "dust_share": 0.0128,
+      "nondust_ln_mean": 9.586,
+      "nondust_ln_sd": 1.78
+     },
+     "9": {
+      "p10": 1340.0,
+      "p50": 15800.0,
+      "p90": 117000.0,
+      "dust_share": 0.0205,
+      "nondust_ln_mean": 9.571,
+      "nondust_ln_sd": 1.86
+     },
+     "10": {
+      "p10": 1330.0,
+      "p50": 15800.0,
+      "p90": 118000.0,
+      "dust_share": 0.0299,
+      "nondust_ln_mean": 9.558,
+      "nondust_ln_sd": 1.91
+     },
+     "11": {
+      "p10": 1320.0,
+      "p50": 15600.0,
+      "p90": 128000.0,
+      "dust_share": 0.0365,
+      "nondust_ln_mean": 9.583,
+      "nondust_ln_sd": 1.88
+     },
+     "12": {
+      "p10": 1340.0,
+      "p50": 19000.0,
+      "p90": 152000.0,
+      "dust_share": 0.0318,
+      "nondust_ln_mean": 9.698,
+      "nondust_ln_sd": 1.77
+     },
+     "13": {
+      "p10": 1360.0,
+      "p50": 24600.0,
+      "p90": 154000.0,
+      "dust_share": 0.0294,
+      "nondust_ln_mean": 9.785,
+      "nondust_ln_sd": 1.68
+     },
+     "14": {
+      "p10": 1450.0,
+      "p50": 24700.0,
+      "p90": 152000.0,
+      "dust_share": 0.0325,
+      "nondust_ln_mean": 9.822,
+      "nondust_ln_sd": 1.62
+     },
+     "15": {
+      "p10": 1350.0,
+      "p50": 24700.0,
+      "p90": 148000.0,
+      "dust_share": 0.0354,
+      "nondust_ln_mean": 9.839,
+      "nondust_ln_sd": 1.61
+     },
+     "16": {
+      "p10": 1340.0,
+      "p50": 24700.0,
+      "p90": 152000.0,
+      "dust_share": 0.0439,
+      "nondust_ln_mean": 9.863,
+      "nondust_ln_sd": 1.66
+     },
+     "17": {
+      "p10": 1330.0,
+      "p50": 22600.0,
+      "p90": 171000.0,
+      "dust_share": 0.0515,
+      "nondust_ln_mean": 9.892,
+      "nondust_ln_sd": 1.72
+     },
+     "18": {
+      "p10": 1320.0,
+      "p50": 18900.0,
+      "p90": 234000.0,
+      "dust_share": 0.0591,
+      "nondust_ln_mean": 9.945,
+      "nondust_ln_sd": 1.77
+     },
+     "19": {
+      "p10": 1330.0,
+      "p50": 18800.0,
+      "p90": 255000.0,
+      "dust_share": 0.057,
+      "nondust_ln_mean": 10.03,
+      "nondust_ln_sd": 1.79
+     },
+     "20": {
+      "p10": 1330.0,
+      "p50": 20100.0,
+      "p90": 257000.0,
+      "dust_share": 0.0563,
+      "nondust_ln_mean": 10.12,
+      "nondust_ln_sd": 1.88
+     }
+    },
+    "median_vs_level_powerlaw_beta": 0.811,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 895.0,
+      "p50": 2920.0,
+      "p90": 15100.0
+     },
+     "5": {
+      "p10": 18800.0,
+      "p50": 49300.0,
+      "p90": 201000.0
+     },
+     "10": {
+      "p10": 83400.0,
+      "p50": 209000.0,
+      "p90": 544000.0
+     },
+     "20": {
+      "p10": 399000.0,
+      "p50": 684000.0,
+      "p90": 1410000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 9120.0,
+     "p50": 12700.0,
+     "p90": 13900.0,
+     "lognormal_mu": 9.342,
+     "lognormal_sigma": 0.235
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.0263,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 3,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.0248,
+       "mu_ln_usd": 4.141,
+       "sigma_ln": 0.922,
+       "median_usd": 62.9
+      },
+      {
+       "weight": 0.628,
+       "mu_ln_usd": 8.725,
+       "sigma_ln": 1.18,
+       "median_usd": 6150.0
+      },
+      {
+       "weight": 0.347,
+       "mu_ln_usd": 11.15,
+       "sigma_ln": 0.839,
+       "median_usd": 69200.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      1180.0,
+      3620.0,
+      12400.0,
+      48500.0,
+      113000.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      1330.0,
+      3150.0,
+      12300.0,
+      50500.0,
+      130000.0
+     ],
+     "max_abs_log_error": 0.14
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.0263,
+     "clips": [
+      {
+       "usd": 1900.0,
+       "window_usd": [
+        1738,
+        2042
+       ],
+       "share": 0.0539,
+       "n_markets": 3
+      },
+      {
+       "usd": 3300.0,
+       "window_usd": [
+        3090,
+        3631
+       ],
+       "share": 0.0402,
+       "n_markets": 3
+      },
+      {
+       "usd": 4800.0,
+       "window_usd": [
+        4467,
+        5248
+       ],
+       "share": 0.0374,
+       "n_markets": 3
+      },
+      {
+       "usd": 7700.0,
+       "window_usd": [
+        7079,
+        8318
+       ],
+       "share": 0.0446,
+       "n_markets": 3
+      },
+      {
+       "usd": 11900.0,
+       "window_usd": [
+        10965,
+        12882
+       ],
+       "share": 0.0665,
+       "n_markets": 3
+      },
+      {
+       "usd": 25400.0,
+       "window_usd": [
+        23442,
+        27542
+       ],
+       "share": 0.0668,
+       "n_markets": 3
+      },
+      {
+       "usd": 30500.0,
+       "window_usd": [
+        28184,
+        33113
+       ],
+       "share": 0.0459,
+       "n_markets": 3
+      },
+      {
+       "usd": 50700.0,
+       "window_usd": [
+        46774,
+        54954
+       ],
+       "share": 0.0585,
+       "n_markets": 3
+      },
+      {
+       "usd": 103500.0,
+       "window_usd": [
+        95499,
+        112202
+       ],
+       "share": 0.0324,
+       "n_markets": 3
+      },
+      {
+       "usd": 171800.0,
+       "window_usd": [
+        158489,
+        186209
+       ],
+       "share": 0.0312,
+       "n_markets": 3
+      }
+     ],
+     "clip_total_share": 0.4774,
+     "background_share": 0.4965,
+     "background_lognormal": {
+      "mu_ln_usd": 9.256,
+      "sigma_ln": 2.111,
+      "median_usd": 10468
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.0263,
+    "share_levels_below_10_usd": 2.31e-05,
+    "share_by_level_k": {
+     "1": 0.00772,
+     "2": 0.00378,
+     "3": 0.00318,
+     "5": 0.00235,
+     "10": 0.0299,
+     "15": 0.0354,
+     "20": 0.0563
+    },
+    "dist_from_mid_bps": {
+     "p10": 7.89,
+     "p25": 10.1,
+     "p50": 13.5,
+     "p75": 19.9,
+     "p90": 23.3
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.391
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.126,
+    "share_nondust_levels_size_repeated_same_side": 0.118,
+    "share_levels_size_appears_on_other_side": 0.122,
+    "share_levels_in_adjacent_identical_run": 0.0449,
+    "share_levels_in_adjacent_identical_run_nondust": 0.0432,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.0198,
+    "multiplicity_share_of_levels": {
+     "1": 0.874,
+     "2": 0.0943,
+     "3": 0.0203,
+     "4+": 0.0109
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.341,
+     "3": 0.0556,
+     "4": 0.0081,
+     "5+": 0.00318
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.325,
+     "3": 0.0549,
+     "4": 0.0081,
+     "5+": 0.00318
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 14.9,
+     "level_changes_incl_fill_per_s": 15.0,
+     "naive_window_changes_per_s": 17.4,
+     "mix": {
+      "add": 0.257,
+      "remove": 0.256,
+      "size_up": 0.243,
+      "size_down": 0.243
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.4,
+      "6-10": 0.283,
+      "11-20": 0.317
+     },
+     "trades_per_s": 0.0963,
+     "n_trades": 3120,
+     "nonfill_changes_per_trade": 154.9,
+     "cancel_like_changes_per_trade": 77.36,
+     "share_seconds_no_level_change": 0.093,
+     "share_seconds_best_price_moved": 0.253,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 1.0,
+      "p50": 8.0,
+      "p90": 39.0,
+      "p99": 52.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.0931,
+      "1-2": 0.145,
+      "3-5": 0.166,
+      "6-10": 0.143,
+      "11-20": 0.14,
+      "21-40": 0.225,
+      "41+": 0.087
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.86
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 12.9,
+     "mix": {
+      "add": 0.237,
+      "remove": 0.237,
+      "size_up": 0.263,
+      "size_down": 0.263
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.412,
+      "6-10": 0.282,
+      "11-20": 0.305
+     },
+     "trades_per_s": 0.0713,
+     "n_trades": 16165,
+     "nonfill_changes_per_trade": 181.2,
+     "cancel_like_changes_per_trade": 90.58,
+     "share_seconds_no_level_change": 0.0901,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.0903,
+      "1-2": 0.155,
+      "3-5": 0.186,
+      "6-10": 0.164,
+      "11-20": 0.151,
+      "21-40": 0.197,
+      "41+": 0.0565
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 44.7,
+     "trades": 0.2889
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 38.7,
+     "trades": 0.2139
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 12.3,
+     "p50": 12.6,
+     "p90": 13.7,
+     "min": 12.2,
+     "max": 14.0,
+     "lognormal_mu": 2.558,
+     "lognormal_sigma": 0.0588
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 3,
+     "p10": 0.0665,
+     "p50": 0.0687,
+     "p90": 0.0772,
+     "min": 0.0659,
+     "max": 0.0793,
+     "lognormal_mu": -2.644,
+     "lognormal_sigma": 0.0793
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 3,
+     "p10": 178.0,
+     "p50": 183.0,
+     "p90": 184.0,
+     "min": 177.0,
+     "max": 185.0,
+     "lognormal_mu": 5.201,
+     "lognormal_sigma": 0.0184
+    }
+   }
+  },
+  "alt_crypto": {
+   "n_markets": 24,
+   "markets": [
+    "HYPE-USD",
+    "PUMP-USD",
+    "ZEC-USD",
+    "XRP-USD",
+    "LIT-USD",
+    "KPEPE-USD",
+    "AAVE-USD",
+    "UNI-USD",
+    "WLD-USD",
+    "NEAR-USD",
+    "KSHIB-USD",
+    "FARTCOIN-USD",
+    "DOGE-USD",
+    "ENA-USD",
+    "ONDO-USD",
+    "SUI-USD",
+    "ADA-USD",
+    "BNB-USD",
+    "ARB-USD",
+    "AVAX-USD",
+    "LTC-USD",
+    "XPL-USD",
+    "LINK-USD",
+    "JUP-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 259224,
+    "levels": 10005133
+   },
+   "real_tick_bps": {
+    "p10": 0.111,
+    "p50": 0.397,
+    "p90": 1.7
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 3.0,
+     "p25": 6.0,
+     "p50": 10.0,
+     "p75": 27.0,
+     "p90": 45.0,
+     "p99": 67.0,
+     "mean": 18.1,
+     "pmf": {
+      "1": 0.0462,
+      "2": 0.0246,
+      "3": 0.0504,
+      "4": 0.0627,
+      "5": 0.0604,
+      "6": 0.0678,
+      "7": 0.0577,
+      "8": 0.0432,
+      "9": 0.0465,
+      "10": 0.0472,
+      "11": 0.0264,
+      "12": 0.0205,
+      ">12": 0.446
+     }
+    },
+    "bps": {
+     "p10": 1.85,
+     "p25": 3.75,
+     "p50": 5.04,
+     "p75": 6.23,
+     "p90": 7.33,
+     "p99": 10.7,
+     "ln_mean": 1.438,
+     "ln_sd": 0.72
+    },
+    "market_median_bps_across_markets": {
+     "p10": 4.01,
+     "p50": 5.05,
+     "p90": 6.4,
+     "min": 1.07,
+     "max": 8.51
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 4.3,
+     "p50": 10.0,
+     "p90": 40.7,
+     "min": 3.0,
+     "max": 49.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 1.0,
+     "p50": 4.0,
+     "p75": 14.0,
+     "p90": 53.0,
+     "p95": 216.0,
+     "p99": 5578.0,
+     "mean": 180.0,
+     "pmf": {
+      "1": 0.297,
+      "2": 0.113,
+      "3": 0.0708,
+      "4": 0.0527,
+      "5": 0.044,
+      "6": 0.0368,
+      "7": 0.0285,
+      "8": 0.0229,
+      "9": 0.0209,
+      "10": 0.0191,
+      ">10": 0.294
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.255,
+     "p25": 0.649,
+     "p50": 1.55,
+     "p75": 4.38,
+     "p90": 23.8,
+     "p99": 3560.0
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.559,
+       "2": 0.136,
+       "3": 0.0728,
+       "4": 0.0468,
+       "5": 0.0322,
+       "6": 0.0243,
+       "7": 0.0185,
+       "8": 0.015,
+       "9": 0.0137,
+       "10": 0.011,
+       ">10": 0.0707
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 3.0,
+      "ticks_p90": 8.0,
+      "ticks_p95": 13.0,
+      "ticks_p99": 25.0,
+      "bps_p10": 0.147,
+      "bps_p50": 0.723,
+      "bps_p90": 2.57,
+      "bps_ln_mean": -0.3222,
+      "bps_ln_sd": 1.04
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.378,
+       "2": 0.152,
+       "3": 0.0913,
+       "4": 0.0657,
+       "5": 0.0523,
+       "6": 0.0452,
+       "7": 0.0289,
+       "8": 0.0225,
+       "9": 0.0193,
+       "10": 0.0177,
+       ">10": 0.127
+      },
+      "ticks_p50": 2.0,
+      "ticks_p75": 6.0,
+      "ticks_p90": 13.0,
+      "ticks_p95": 20.0,
+      "ticks_p99": 43.0,
+      "bps_p10": 0.202,
+      "bps_p50": 0.999,
+      "bps_p90": 4.2,
+      "bps_ln_mean": 0.04628,
+      "bps_ln_sd": 1.14
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.141,
+       "2": 0.0826,
+       "3": 0.0589,
+       "4": 0.0483,
+       "5": 0.0446,
+       "6": 0.0376,
+       "7": 0.0326,
+       "8": 0.0265,
+       "9": 0.0248,
+       "10": 0.0234,
+       ">10": 0.48
+      },
+      "ticks_p50": 10.0,
+      "ticks_p75": 34.0,
+      "ticks_p90": 206.0,
+      "ticks_p95": 545.0,
+      "ticks_p99": 9984.0,
+      "bps_p10": 0.487,
+      "bps_p50": 3.16,
+      "bps_p90": 50.0,
+      "bps_ln_mean": 1.482,
+      "bps_ln_sd": 2.09
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 0.78,
+     "p50": 1.35,
+     "p90": 2.77
+    }
+   },
+   "levels_per_side": {
+    "share_20": 0.805,
+    "share_lt10": 0.000143,
+    "share_0": 0,
+    "p10": 17.0,
+    "p50": 20.0,
+    "mean": 19.3
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 0.925,
+     "p25": 1.87,
+     "p50": 2.52,
+     "p75": 3.11,
+     "p90": 3.66
+    },
+    "2": {
+     "p10": 2.15,
+     "p25": 2.78,
+     "p50": 3.45,
+     "p75": 4.24,
+     "p90": 5.65
+    },
+    "3": {
+     "p10": 2.8,
+     "p25": 3.45,
+     "p50": 4.23,
+     "p75": 5.45,
+     "p90": 8.03
+    },
+    "5": {
+     "p10": 3.67,
+     "p25": 4.54,
+     "p50": 6.01,
+     "p75": 8.65,
+     "p90": 13.0
+    },
+    "10": {
+     "p10": 7.1,
+     "p25": 9.78,
+     "p50": 13.5,
+     "p75": 17.8,
+     "p90": 28.1
+    },
+    "15": {
+     "p10": 13.2,
+     "p25": 17.2,
+     "p50": 24.1,
+     "p75": 38.7,
+     "p90": 93.8
+    },
+    "20": {
+     "p10": 22.4,
+     "p25": 35.3,
+     "p50": 69.4,
+     "p75": 170.0,
+     "p90": 2080.0
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 11.1,
+     "p10": 11.5,
+     "p25": 1530.0,
+     "p50": 6420.0,
+     "p75": 28700.0,
+     "p90": 71100.0,
+     "p95": 116000.0,
+     "p99": 234000.0,
+     "ln_mean": 8.324,
+     "ln_sd": 2.69
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 245.0,
+     "p10": 595.0,
+     "p25": 3980.0,
+     "p50": 7430.0,
+     "p75": 30700.0,
+     "p90": 74900.0,
+     "p95": 129000.0,
+     "p99": 277000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 248.0,
+      "p50": 1780.0,
+      "p90": 27700.0,
+      "dust_share": 0.0309,
+      "nondust_ln_mean": 7.78,
+      "nondust_ln_sd": 1.86
+     },
+     "2": {
+      "p10": 340.0,
+      "p50": 9830.0,
+      "p90": 65900.0,
+      "dust_share": 0.0168,
+      "nondust_ln_mean": 8.901,
+      "nondust_ln_sd": 1.85
+     },
+     "3": {
+      "p10": 979.0,
+      "p50": 18900.0,
+      "p90": 81100.0,
+      "dust_share": 0.0234,
+      "nondust_ln_mean": 9.569,
+      "nondust_ln_sd": 1.69
+     },
+     "4": {
+      "p10": 1020.0,
+      "p50": 17200.0,
+      "p90": 80700.0,
+      "dust_share": 0.0258,
+      "nondust_ln_mean": 9.627,
+      "nondust_ln_sd": 1.59
+     },
+     "5": {
+      "p10": 997.0,
+      "p50": 12900.0,
+      "p90": 71900.0,
+      "dust_share": 0.0368,
+      "nondust_ln_mean": 9.438,
+      "nondust_ln_sd": 1.54
+     },
+     "6": {
+      "p10": 483.0,
+      "p50": 10000.0,
+      "p90": 62900.0,
+      "dust_share": 0.0555,
+      "nondust_ln_mean": 9.268,
+      "nondust_ln_sd": 1.49
+     },
+     "7": {
+      "p10": 256.0,
+      "p50": 6450.0,
+      "p90": 60500.0,
+      "dust_share": 0.0722,
+      "nondust_ln_mean": 9.173,
+      "nondust_ln_sd": 1.48
+     },
+     "8": {
+      "p10": 134.0,
+      "p50": 6430.0,
+      "p90": 60300.0,
+      "dust_share": 0.0872,
+      "nondust_ln_mean": 9.134,
+      "nondust_ln_sd": 1.49
+     },
+     "9": {
+      "p10": 99.9,
+      "p50": 6410.0,
+      "p90": 59800.0,
+      "dust_share": 0.0956,
+      "nondust_ln_mean": 9.112,
+      "nondust_ln_sd": 1.49
+     },
+     "10": {
+      "p10": 97.9,
+      "p50": 6410.0,
+      "p90": 59500.0,
+      "dust_share": 0.0984,
+      "nondust_ln_mean": 9.092,
+      "nondust_ln_sd": 1.51
+     },
+     "11": {
+      "p10": 11.4,
+      "p50": 6390.0,
+      "p90": 59400.0,
+      "dust_share": 0.108,
+      "nondust_ln_mean": 9.065,
+      "nondust_ln_sd": 1.54
+     },
+     "12": {
+      "p10": 11.2,
+      "p50": 6370.0,
+      "p90": 60900.0,
+      "dust_share": 0.127,
+      "nondust_ln_mean": 9.016,
+      "nondust_ln_sd": 1.61
+     },
+     "13": {
+      "p10": 11.1,
+      "p50": 6350.0,
+      "p90": 63700.0,
+      "dust_share": 0.154,
+      "nondust_ln_mean": 8.952,
+      "nondust_ln_sd": 1.73
+     },
+     "14": {
+      "p10": 11.1,
+      "p50": 6330.0,
+      "p90": 64200.0,
+      "dust_share": 0.18,
+      "nondust_ln_mean": 8.908,
+      "nondust_ln_sd": 1.85
+     },
+     "15": {
+      "p10": 11.1,
+      "p50": 6320.0,
+      "p90": 69700.0,
+      "dust_share": 0.193,
+      "nondust_ln_mean": 8.935,
+      "nondust_ln_sd": 1.95
+     },
+     "16": {
+      "p10": 11.1,
+      "p50": 6250.0,
+      "p90": 75100.0,
+      "dust_share": 0.199,
+      "nondust_ln_mean": 8.966,
+      "nondust_ln_sd": 2.07
+     },
+     "17": {
+      "p10": 11.1,
+      "p50": 5000.0,
+      "p90": 82400.0,
+      "dust_share": 0.196,
+      "nondust_ln_mean": 9.001,
+      "nondust_ln_sd": 2.18
+     },
+     "18": {
+      "p10": 11.1,
+      "p50": 4970.0,
+      "p90": 115000.0,
+      "dust_share": 0.183,
+      "nondust_ln_mean": 8.943,
+      "nondust_ln_sd": 2.33
+     },
+     "19": {
+      "p10": 11.2,
+      "p50": 4970.0,
+      "p90": 117000.0,
+      "dust_share": 0.159,
+      "nondust_ln_mean": 8.832,
+      "nondust_ln_sd": 2.46
+     },
+     "20": {
+      "p10": 11.3,
+      "p50": 5000.0,
+      "p90": 117000.0,
+      "dust_share": 0.133,
+      "nondust_ln_mean": 8.671,
+      "nondust_ln_sd": 2.55
+     }
+    },
+    "median_vs_level_powerlaw_beta": -0.084,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 248.0,
+      "p50": 1780.0,
+      "p90": 27700.0
+     },
+     "5": {
+      "p10": 30400.0,
+      "p50": 118000.0,
+      "p90": 282000.0
+     },
+     "10": {
+      "p10": 80500.0,
+      "p50": 221000.0,
+      "p90": 473000.0
+     },
+     "20": {
+      "p10": 188000.0,
+      "p50": 421000.0,
+      "p90": 796000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 5380.0,
+     "p50": 6440.0,
+     "p90": 12000.0,
+     "lognormal_mu": 8.897,
+     "lognormal_sigma": 0.327
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.107,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 3,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.333,
+       "mu_ln_usd": 7.357,
+       "sigma_ln": 1.84,
+       "median_usd": 1570.0
+      },
+      {
+       "weight": 0.181,
+       "mu_ln_usd": 8.761,
+       "sigma_ln": 0.05,
+       "median_usd": 6380.0
+      },
+      {
+       "weight": 0.486,
+       "mu_ln_usd": 10.28,
+       "sigma_ln": 1.11,
+       "median_usd": 29000.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      11.3,
+      1410.0,
+      6600.0,
+      26600.0,
+      69500.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      11.5,
+      1530.0,
+      6420.0,
+      28700.0,
+      71100.0
+     ],
+     "max_abs_log_error": 0.0817
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.1066,
+     "clips": [
+      {
+       "usd": 260.0,
+       "window_usd": [
+        240,
+        282
+       ],
+       "share": 0.0185,
+       "n_markets": 23
+      },
+      {
+       "usd": 1900.0,
+       "window_usd": [
+        1738,
+        2042
+       ],
+       "share": 0.0192,
+       "n_markets": 21
+      },
+      {
+       "usd": 4000.0,
+       "window_usd": [
+        3715,
+        4365
+       ],
+       "share": 0.0269,
+       "n_markets": 21
+      },
+      {
+       "usd": 6700.0,
+       "window_usd": [
+        6166,
+        7244
+       ],
+       "share": 0.1748,
+       "n_markets": 24
+      },
+      {
+       "usd": 11900.0,
+       "window_usd": [
+        10965,
+        12882
+       ],
+       "share": 0.0424,
+       "n_markets": 23
+      },
+      {
+       "usd": 16000.0,
+       "window_usd": [
+        14791,
+        17378
+       ],
+       "share": 0.0414,
+       "n_markets": 23
+      },
+      {
+       "usd": 32000.0,
+       "window_usd": [
+        29512,
+        34674
+       ],
+       "share": 0.0325,
+       "n_markets": 24
+      },
+      {
+       "usd": 47300.0,
+       "window_usd": [
+        43652,
+        51286
+       ],
+       "share": 0.0298,
+       "n_markets": 23
+      },
+      {
+       "usd": 63800.0,
+       "window_usd": [
+        58884,
+        69183
+       ],
+       "share": 0.0322,
+       "n_markets": 23
+      },
+      {
+       "usd": 75000.0,
+       "window_usd": [
+        69183,
+        81283
+       ],
+       "share": 0.0425,
+       "n_markets": 22
+      }
+     ],
+     "clip_total_share": 0.4602,
+     "background_share": 0.4334,
+     "background_lognormal": {
+      "mu_ln_usd": 8.717,
+      "sigma_ln": 2.265,
+      "median_usd": 6105
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.107,
+    "share_levels_below_10_usd": 1.5e-06,
+    "share_by_level_k": {
+     "1": 0.0309,
+     "2": 0.0168,
+     "3": 0.0234,
+     "5": 0.0368,
+     "10": 0.0984,
+     "15": 0.193,
+     "20": 0.133
+    },
+    "dist_from_mid_bps": {
+     "p10": 9.95,
+     "p25": 16.0,
+     "p50": 23.7,
+     "p75": 31.6,
+     "p90": 39.5
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.912
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.323,
+    "share_nondust_levels_size_repeated_same_side": 0.252,
+    "share_levels_size_appears_on_other_side": 0.383,
+    "share_levels_in_adjacent_identical_run": 0.158,
+    "share_levels_in_adjacent_identical_run_nondust": 0.131,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.0314,
+    "multiplicity_share_of_levels": {
+     "1": 0.677,
+     "2": 0.108,
+     "3": 0.0968,
+     "4+": 0.118
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.854,
+     "3": 0.36,
+     "4": 0.0328,
+     "5+": 0.0235
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.632,
+     "3": 0.333,
+     "4": 0.0326,
+     "5+": 0.0235
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 14.5,
+     "level_changes_incl_fill_per_s": 14.6,
+     "naive_window_changes_per_s": 16.3,
+     "mix": {
+      "add": 0.391,
+      "remove": 0.39,
+      "size_up": 0.109,
+      "size_down": 0.111
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.526,
+      "6-10": 0.287,
+      "11-20": 0.187
+     },
+     "trades_per_s": 0.013,
+     "n_trades": 3380,
+     "nonfill_changes_per_trade": 1115.0,
+     "cancel_like_changes_per_trade": 558.3,
+     "share_seconds_no_level_change": 0.163,
+     "share_seconds_best_price_moved": 0.558,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 0.0,
+      "p50": 11.0,
+      "p90": 35.0,
+      "p99": 52.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.163,
+      "1-2": 0.0977,
+      "3-5": 0.101,
+      "6-10": 0.132,
+      "11-20": 0.202,
+      "21-40": 0.25,
+      "41+": 0.0549
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.725
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 13.2,
+     "mix": {
+      "add": 0.385,
+      "remove": 0.385,
+      "size_up": 0.114,
+      "size_down": 0.116
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.537,
+      "6-10": 0.279,
+      "11-20": 0.184
+     },
+     "trades_per_s": 0.0107,
+     "n_trades": 19367,
+     "nonfill_changes_per_trade": 1235.0,
+     "cancel_like_changes_per_trade": 618.1,
+     "share_seconds_no_level_change": 0.174,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.174,
+      "1-2": 0.108,
+      "3-5": 0.11,
+      "6-10": 0.14,
+      "11-20": 0.204,
+      "21-40": 0.22,
+      "41+": 0.0434
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 348.0,
+     "trades": 0.312
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 316.8,
+     "trades": 0.2568
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 6.79,
+     "p50": 12.4,
+     "p90": 20.6,
+     "min": 2.98,
+     "max": 23.9,
+     "lognormal_mu": 2.474,
+     "lognormal_sigma": 0.493
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 24,
+     "p10": 0.000992,
+     "p50": 0.00643,
+     "p90": 0.0279,
+     "min": 0.000371,
+     "max": 0.0371,
+     "lognormal_mu": -5.139,
+     "lognormal_sigma": 1.27
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 24,
+     "p10": 724.0,
+     "p50": 1950.0,
+     "p90": 8020.0,
+     "min": 386.0,
+     "max": 13500.0,
+     "lognormal_mu": 7.613,
+     "lognormal_sigma": 0.936
+    }
+   }
+  },
+  "longtail_crypto": {
+   "n_markets": 13,
+   "markets": [
+    "VVV-USD",
+    "TAO-USD",
+    "ZRO-USD",
+    "PONS-USD",
+    "CASHCAT-USD",
+    "USELESS-USD",
+    "KAITO-USD",
+    "LDO-USD",
+    "XMR-USD",
+    "VIRTUAL-USD",
+    "ETHFI-USD",
+    "PENDLE-USD",
+    "MORPHO-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 140413,
+    "levels": 5003674
+   },
+   "real_tick_bps": {
+    "p10": 0.128,
+    "p50": 0.326,
+    "p90": 0.561
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 8.0,
+     "p25": 12.0,
+     "p50": 19.0,
+     "p75": 35.0,
+     "p90": 59.0,
+     "p99": 269.0,
+     "mean": 84.8,
+     "pmf": {
+      "1": 0.0438,
+      "2": 0.00592,
+      "3": 0.00531,
+      "4": 0.00726,
+      "5": 0.00863,
+      "6": 0.0123,
+      "7": 0.0142,
+      "8": 0.0189,
+      "9": 0.0262,
+      "10": 0.0324,
+      "11": 0.0373,
+      "12": 0.0398,
+      ">12": 0.748
+     }
+    },
+    "bps": {
+     "p10": 2.65,
+     "p25": 4.21,
+     "p50": 5.5,
+     "p75": 7.01,
+     "p90": 19.4,
+     "p99": 113.0,
+     "ln_mean": 1.798,
+     "ln_sd": 1.21
+    },
+    "market_median_bps_across_markets": {
+     "p10": 4.5,
+     "p50": 5.34,
+     "p90": 14.5,
+     "min": 4.34,
+     "max": 107.0
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 13.0,
+     "p50": 24.0,
+     "p90": 47.8,
+     "min": 9.0,
+     "max": 254.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 2.0,
+     "p50": 7.0,
+     "p75": 28.0,
+     "p90": 214.0,
+     "p95": 804.0,
+     "p99": 10254.0,
+     "mean": 398.0,
+     "pmf": {
+      "1": 0.188,
+      "2": 0.0924,
+      "3": 0.0658,
+      "4": 0.0523,
+      "5": 0.0446,
+      "6": 0.0407,
+      "7": 0.0318,
+      "8": 0.0277,
+      "9": 0.0225,
+      "10": 0.0202,
+      ">10": 0.414
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.299,
+     "p25": 0.623,
+     "p50": 1.93,
+     "p75": 7.29,
+     "p90": 60.8,
+     "p99": 3780.0
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.405,
+       "2": 0.115,
+       "3": 0.0778,
+       "4": 0.0646,
+       "5": 0.0512,
+       "6": 0.0439,
+       "7": 0.0363,
+       "8": 0.032,
+       "9": 0.0231,
+       "10": 0.018,
+       ">10": 0.133
+      },
+      "ticks_p50": 2.0,
+      "ticks_p75": 6.0,
+      "ticks_p90": 13.0,
+      "ticks_p95": 21.0,
+      "ticks_p99": 74.0,
+      "bps_p10": 0.186,
+      "bps_p50": 0.711,
+      "bps_p90": 3.93,
+      "bps_ln_mean": -0.1874,
+      "bps_ln_sd": 1.24
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.18,
+       "2": 0.124,
+       "3": 0.0878,
+       "4": 0.0678,
+       "5": 0.0572,
+       "6": 0.0549,
+       "7": 0.0403,
+       "8": 0.034,
+       "9": 0.0288,
+       "10": 0.0263,
+       ">10": 0.299
+      },
+      "ticks_p50": 5.0,
+      "ticks_p75": 13.0,
+      "ticks_p90": 27.0,
+      "ticks_p95": 47.0,
+      "ticks_p99": 5873.0,
+      "bps_p10": 0.322,
+      "bps_p50": 1.46,
+      "bps_p90": 7.77,
+      "bps_ln_mean": 0.5282,
+      "bps_ln_sd": 1.63
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.0849,
+       "2": 0.0617,
+       "3": 0.0464,
+       "4": 0.0367,
+       "5": 0.0337,
+       "6": 0.0304,
+       "7": 0.0243,
+       "8": 0.0217,
+       "9": 0.0185,
+       "10": 0.0175,
+       ">10": 0.624
+      },
+      "ticks_p50": 22.0,
+      "ticks_p75": 123.0,
+      "ticks_p90": 777.0,
+      "ticks_p95": 4279.0,
+      "ticks_p99": 13311.0,
+      "bps_p10": 0.504,
+      "bps_p50": 5.01,
+      "bps_p90": 117.0,
+      "bps_ln_mean": 2.075,
+      "bps_ln_sd": 2.42
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 1.04,
+     "p50": 1.94,
+     "p90": 8.52
+    }
+   },
+   "levels_per_side": {
+    "share_20": 0.568,
+    "share_lt10": 0.0526,
+    "share_0": 0.00047,
+    "p10": 13.0,
+    "p50": 20.0,
+    "mean": 17.8
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 1.32,
+     "p25": 2.11,
+     "p50": 2.75,
+     "p75": 3.5,
+     "p90": 9.68
+    },
+    "2": {
+     "p10": 2.38,
+     "p25": 2.98,
+     "p50": 3.64,
+     "p75": 4.7,
+     "p90": 12.7
+    },
+    "3": {
+     "p10": 3.04,
+     "p25": 3.61,
+     "p50": 4.44,
+     "p75": 6.48,
+     "p90": 15.9
+    },
+    "5": {
+     "p10": 4.17,
+     "p25": 4.99,
+     "p50": 6.72,
+     "p75": 12.0,
+     "p90": 26.1
+    },
+    "10": {
+     "p10": 9.46,
+     "p25": 12.1,
+     "p50": 15.7,
+     "p75": 24.1,
+     "p90": 69.9
+    },
+    "15": {
+     "p10": 16.2,
+     "p25": 19.9,
+     "p50": 32.8,
+     "p75": 163.0,
+     "p90": 308.0
+    },
+    "20": {
+     "p10": 28.3,
+     "p25": 39.6,
+     "p50": 98.5,
+     "p75": 294.0,
+     "p90": 2960.0
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 11.0,
+     "p10": 11.2,
+     "p25": 317.0,
+     "p50": 3020.0,
+     "p75": 9870.0,
+     "p90": 29900.0,
+     "p95": 71500.0,
+     "p99": 125000.0,
+     "ln_mean": 7.388,
+     "ln_sd": 2.64
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 132.0,
+     "p10": 283.0,
+     "p25": 1020.0,
+     "p50": 5840.0,
+     "p75": 11800.0,
+     "p90": 33100.0,
+     "p95": 74900.0,
+     "p99": 126000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 19.7,
+      "p50": 1500.0,
+      "p90": 30200.0,
+      "dust_share": 0.0921,
+      "nondust_ln_mean": 7.683,
+      "nondust_ln_sd": 2.03
+     },
+     "2": {
+      "p10": 249.0,
+      "p50": 6100.0,
+      "p90": 87600.0,
+      "dust_share": 0.069,
+      "nondust_ln_mean": 8.871,
+      "nondust_ln_sd": 1.97
+     },
+     "3": {
+      "p10": 246.0,
+      "p50": 14000.0,
+      "p90": 98000.0,
+      "dust_share": 0.0847,
+      "nondust_ln_mean": 9.299,
+      "nondust_ln_sd": 1.87
+     },
+     "4": {
+      "p10": 19.6,
+      "p50": 9090.0,
+      "p90": 79500.0,
+      "dust_share": 0.0989,
+      "nondust_ln_mean": 9.173,
+      "nondust_ln_sd": 1.83
+     },
+     "5": {
+      "p10": 11.2,
+      "p50": 6320.0,
+      "p90": 60200.0,
+      "dust_share": 0.116,
+      "nondust_ln_mean": 8.807,
+      "nondust_ln_sd": 1.8
+     },
+     "6": {
+      "p10": 11.2,
+      "p50": 2750.0,
+      "p90": 36600.0,
+      "dust_share": 0.128,
+      "nondust_ln_mean": 8.383,
+      "nondust_ln_sd": 1.73
+     },
+     "7": {
+      "p10": 11.3,
+      "p50": 2040.0,
+      "p90": 29600.0,
+      "dust_share": 0.123,
+      "nondust_ln_mean": 8.064,
+      "nondust_ln_sd": 1.67
+     },
+     "8": {
+      "p10": 11.2,
+      "p50": 2480.0,
+      "p90": 15100.0,
+      "dust_share": 0.134,
+      "nondust_ln_mean": 8.003,
+      "nondust_ln_sd": 1.55
+     },
+     "9": {
+      "p10": 11.2,
+      "p50": 2650.0,
+      "p90": 12600.0,
+      "dust_share": 0.14,
+      "nondust_ln_mean": 7.936,
+      "nondust_ln_sd": 1.57
+     },
+     "10": {
+      "p10": 11.2,
+      "p50": 2850.0,
+      "p90": 11300.0,
+      "dust_share": 0.149,
+      "nondust_ln_mean": 7.967,
+      "nondust_ln_sd": 1.47
+     },
+     "11": {
+      "p10": 11.1,
+      "p50": 2780.0,
+      "p90": 11000.0,
+      "dust_share": 0.166,
+      "nondust_ln_mean": 8.027,
+      "nondust_ln_sd": 1.38
+     },
+     "12": {
+      "p10": 11.1,
+      "p50": 2660.0,
+      "p90": 11600.0,
+      "dust_share": 0.178,
+      "nondust_ln_mean": 8.026,
+      "nondust_ln_sd": 1.39
+     },
+     "13": {
+      "p10": 11.2,
+      "p50": 2470.0,
+      "p90": 11800.0,
+      "dust_share": 0.185,
+      "nondust_ln_mean": 7.956,
+      "nondust_ln_sd": 1.47
+     },
+     "14": {
+      "p10": 11.2,
+      "p50": 2470.0,
+      "p90": 11900.0,
+      "dust_share": 0.196,
+      "nondust_ln_mean": 7.916,
+      "nondust_ln_sd": 1.58
+     },
+     "15": {
+      "p10": 11.2,
+      "p50": 2500.0,
+      "p90": 12600.0,
+      "dust_share": 0.187,
+      "nondust_ln_mean": 7.821,
+      "nondust_ln_sd": 1.76
+     },
+     "16": {
+      "p10": 11.2,
+      "p50": 2360.0,
+      "p90": 13000.0,
+      "dust_share": 0.17,
+      "nondust_ln_mean": 7.717,
+      "nondust_ln_sd": 1.9
+     },
+     "17": {
+      "p10": 11.2,
+      "p50": 2030.0,
+      "p90": 21700.0,
+      "dust_share": 0.16,
+      "nondust_ln_mean": 7.746,
+      "nondust_ln_sd": 1.98
+     },
+     "18": {
+      "p10": 11.2,
+      "p50": 1620.0,
+      "p90": 26500.0,
+      "dust_share": 0.155,
+      "nondust_ln_mean": 7.79,
+      "nondust_ln_sd": 2.08
+     },
+     "19": {
+      "p10": 11.3,
+      "p50": 1560.0,
+      "p90": 29400.0,
+      "dust_share": 0.153,
+      "nondust_ln_mean": 7.787,
+      "nondust_ln_sd": 2.2
+     },
+     "20": {
+      "p10": 11.3,
+      "p50": 1610.0,
+      "p90": 31900.0,
+      "dust_share": 0.141,
+      "nondust_ln_mean": 7.921,
+      "nondust_ln_sd": 2.28
+     }
+    },
+    "median_vs_level_powerlaw_beta": -0.365,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 19.7,
+      "p50": 1500.0,
+      "p90": 30200.0
+     },
+     "5": {
+      "p10": 10700.0,
+      "p50": 77100.0,
+      "p90": 268000.0
+     },
+     "10": {
+      "p10": 21100.0,
+      "p50": 173000.0,
+      "p90": 318000.0
+     },
+     "20": {
+      "p10": 78000.0,
+      "p50": 273000.0,
+      "p90": 449000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 797.0,
+     "p50": 1580.0,
+     "p90": 6390.0,
+     "lognormal_mu": 7.789,
+     "lognormal_sigma": 0.94
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.139,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 2,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.381,
+       "mu_ln_usd": 6.691,
+       "sigma_ln": 1.59,
+       "median_usd": 805.0
+      },
+      {
+       "weight": 0.619,
+       "mu_ln_usd": 9.119,
+       "sigma_ln": 1.3,
+       "median_usd": 9130.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      11.3,
+      392.0,
+      2920.0,
+      11100.0,
+      29900.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      11.2,
+      317.0,
+      3020.0,
+      9870.0,
+      29900.0
+     ],
+     "max_abs_log_error": 0.212
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.1391,
+     "clips": [
+      {
+       "usd": 250.0,
+       "window_usd": [
+        229,
+        269
+       ],
+       "share": 0.0251,
+       "n_markets": 13
+      },
+      {
+       "usd": 300.0,
+       "window_usd": [
+        275,
+        324
+       ],
+       "share": 0.0285,
+       "n_markets": 7
+      },
+      {
+       "usd": 990.0,
+       "window_usd": [
+        912,
+        1072
+       ],
+       "share": 0.0398,
+       "n_markets": 12
+      },
+      {
+       "usd": 1300.0,
+       "window_usd": [
+        1230,
+        1445
+       ],
+       "share": 0.0485,
+       "n_markets": 13
+      },
+      {
+       "usd": 1600.0,
+       "window_usd": [
+        1445,
+        1698
+       ],
+       "share": 0.0284,
+       "n_markets": 11
+      },
+      {
+       "usd": 3500.0,
+       "window_usd": [
+        3236,
+        3802
+       ],
+       "share": 0.0289,
+       "n_markets": 12
+      },
+      {
+       "usd": 6000.0,
+       "window_usd": [
+        5495,
+        6457
+       ],
+       "share": 0.1376,
+       "n_markets": 13
+      },
+      {
+       "usd": 10600.0,
+       "window_usd": [
+        9772,
+        11482
+       ],
+       "share": 0.0327,
+       "n_markets": 12
+      },
+      {
+       "usd": 28500.0,
+       "window_usd": [
+        26303,
+        30903
+       ],
+       "share": 0.031,
+       "n_markets": 11
+      },
+      {
+       "usd": 80400.0,
+       "window_usd": [
+        74131,
+        87096
+       ],
+       "share": 0.0235,
+       "n_markets": 8
+      }
+     ],
+     "clip_total_share": 0.424,
+     "background_share": 0.4368,
+     "background_lognormal": {
+      "mu_ln_usd": 8.226,
+      "sigma_ln": 2.141,
+      "median_usd": 3736
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.139,
+    "share_levels_below_10_usd": 9.99e-07,
+    "share_by_level_k": {
+     "1": 0.0921,
+     "2": 0.069,
+     "3": 0.0847,
+     "5": 0.116,
+     "10": 0.149,
+     "15": 0.187,
+     "20": 0.141
+    },
+    "dist_from_mid_bps": {
+     "p10": 7.81,
+     "p25": 13.3,
+     "p50": 21.2,
+     "p75": 30.1,
+     "p90": 42.3
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.909
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.381,
+    "share_nondust_levels_size_repeated_same_side": 0.296,
+    "share_levels_size_appears_on_other_side": 0.453,
+    "share_levels_in_adjacent_identical_run": 0.203,
+    "share_levels_in_adjacent_identical_run_nondust": 0.167,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.034,
+    "multiplicity_share_of_levels": {
+     "1": 0.619,
+     "2": 0.0939,
+     "3": 0.15,
+     "4+": 0.137
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.858,
+     "3": 0.491,
+     "4": 0.0427,
+     "5+": 0.0452
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.615,
+     "3": 0.442,
+     "4": 0.0426,
+     "5+": 0.0452
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 11.6,
+     "level_changes_incl_fill_per_s": 11.6,
+     "naive_window_changes_per_s": 12.7,
+     "mix": {
+      "add": 0.428,
+      "remove": 0.428,
+      "size_up": 0.0703,
+      "size_down": 0.0733
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.603,
+      "6-10": 0.251,
+      "11-20": 0.147
+     },
+     "trades_per_s": 0.00832,
+     "n_trades": 1168,
+     "nonfill_changes_per_trade": 1389.0,
+     "cancel_like_changes_per_trade": 696.7,
+     "share_seconds_no_level_change": 0.194,
+     "share_seconds_best_price_moved": 0.56,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 0.0,
+      "p50": 8.0,
+      "p90": 29.0,
+      "p99": 48.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.194,
+      "1-2": 0.0993,
+      "3-5": 0.116,
+      "6-10": 0.172,
+      "11-20": 0.217,
+      "21-40": 0.172,
+      "41+": 0.031
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.801
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 11.0,
+     "mix": {
+      "add": 0.426,
+      "remove": 0.426,
+      "size_up": 0.0729,
+      "size_down": 0.0756
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.607,
+      "6-10": 0.248,
+      "11-20": 0.145
+     },
+     "trades_per_s": 0.00993,
+     "n_trades": 9749,
+     "nonfill_changes_per_trade": 1104.0,
+     "cancel_like_changes_per_trade": 553.6,
+     "share_seconds_no_level_change": 0.204,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.204,
+      "1-2": 0.102,
+      "3-5": 0.119,
+      "6-10": 0.178,
+      "11-20": 0.213,
+      "21-40": 0.159,
+      "41+": 0.0264
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 150.8,
+     "trades": 0.1082
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 143.0,
+     "trades": 0.1291
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 4.79,
+     "p50": 9.59,
+     "p90": 16.3,
+     "min": 3.64,
+     "max": 18.0,
+     "lognormal_mu": 2.287,
+     "lognormal_sigma": 0.494
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 13,
+     "p10": 0.00192,
+     "p50": 0.00619,
+     "p90": 0.0254,
+     "min": 0.000238,
+     "max": 0.0282,
+     "lognormal_mu": -5.192,
+     "lognormal_sigma": 1.25
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 13,
+     "p10": 576.0,
+     "p50": 1560.0,
+     "p90": 5570.0,
+     "min": 149.0,
+     "max": 15300.0,
+     "lognormal_mu": 7.479,
+     "lognormal_sigma": 1.17
+    }
+   }
+  },
+  "tradfi": {
+   "n_markets": 48,
+   "markets": [
+    "SP500-USD",
+    "GOLD-USD",
+    "WTIOIL-USD",
+    "NAS100-USD",
+    "SILVER-USD",
+    "SPCX-USD",
+    "MU-USD",
+    "SKHY-USD",
+    "SKHYNIX-USD",
+    "AAPL-USD",
+    "MSFT-USD",
+    "GOOG-USD",
+    "AMZN-USD",
+    "NVDA-USD",
+    "META-USD",
+    "TSLA-USD",
+    "AMD-USD",
+    "INTC-USD",
+    "AVGO-USD",
+    "QCOM-USD",
+    "ARM-USD",
+    "TSM-USD",
+    "ASML-USD",
+    "SNDK-USD",
+    "DRAM-USD",
+    "HOOD-USD",
+    "MSTR-USD",
+    "STRC-USD",
+    "CRCL-USD",
+    "COIN-USD",
+    "RKLB-USD",
+    "LITE-USD",
+    "NBIS-USD",
+    "ORCL-USD",
+    "PLTR-USD",
+    "BRENTOIL-USD",
+    "BABA-USD",
+    "ZM-USD",
+    "DELL-USD",
+    "CXMT-USD",
+    "SAMSUNG-USD",
+    "CRWV-USD",
+    "CBRS-USD",
+    "MRVL-USD",
+    "EWY-USD",
+    "NCLD-USD",
+    "SOXL-USD",
+    "UNITREE-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 518448,
+    "levels": 18739101
+   },
+   "real_tick_bps": {
+    "p10": 0.116,
+    "p50": 0.372,
+    "p90": 0.833
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 3.0,
+     "p25": 6.0,
+     "p50": 10.0,
+     "p75": 20.0,
+     "p90": 35.0,
+     "p99": 63.0,
+     "mean": 15.3,
+     "pmf": {
+      "1": 0.0805,
+      "2": 0.0122,
+      "3": 0.0203,
+      "4": 0.0354,
+      "5": 0.0511,
+      "6": 0.0656,
+      "7": 0.0706,
+      "8": 0.0634,
+      "9": 0.055,
+      "10": 0.0508,
+      "11": 0.0411,
+      "12": 0.0416,
+      ">12": 0.413
+     }
+    },
+    "bps": {
+     "p10": 1.03,
+     "p25": 2.88,
+     "p50": 4.27,
+     "p75": 5.32,
+     "p90": 6.53,
+     "p99": 9.71,
+     "ln_mean": 1.172,
+     "ln_sd": 0.929
+    },
+    "market_median_bps_across_markets": {
+     "p10": 2.76,
+     "p50": 4.36,
+     "p90": 5.61,
+     "min": 0.131,
+     "max": 8.99
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 5.7,
+     "p50": 10.5,
+     "p90": 31.3,
+     "min": 1.0,
+     "max": 47.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 1.0,
+     "p50": 2.0,
+     "p75": 5.0,
+     "p90": 23.0,
+     "p95": 131.0,
+     "p99": 7261.0,
+     "mean": 268.0,
+     "pmf": {
+      "1": 0.458,
+      "2": 0.134,
+      "3": 0.0771,
+      "4": 0.0508,
+      "5": 0.0344,
+      "6": 0.0278,
+      "7": 0.0206,
+      "8": 0.0174,
+      "9": 0.0126,
+      "10": 0.011,
+      ">10": 0.156
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.165,
+     "p25": 0.329,
+     "p50": 0.67,
+     "p75": 1.84,
+     "p90": 7.39,
+     "p99": 3720.0
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.577,
+       "2": 0.125,
+       "3": 0.0736,
+       "4": 0.0472,
+       "5": 0.0318,
+       "6": 0.023,
+       "7": 0.0174,
+       "8": 0.0131,
+       "9": 0.0105,
+       "10": 0.009,
+       ">10": 0.0717
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 3.0,
+      "ticks_p90": 8.0,
+      "ticks_p95": 15.0,
+      "ticks_p99": 42.0,
+      "bps_p10": 0.162,
+      "bps_p50": 0.581,
+      "bps_p90": 2.05,
+      "bps_ln_mean": -0.4776,
+      "bps_ln_sd": 1.03
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.554,
+       "2": 0.126,
+       "3": 0.0613,
+       "4": 0.0382,
+       "5": 0.0258,
+       "6": 0.0188,
+       "7": 0.0142,
+       "8": 0.0157,
+       "9": 0.00806,
+       "10": 0.0072,
+       ">10": 0.131
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 4.0,
+      "ticks_p90": 17.0,
+      "ticks_p95": 69.0,
+      "ticks_p99": 8023.0,
+      "bps_p10": 0.163,
+      "bps_p50": 0.582,
+      "bps_p90": 5.53,
+      "bps_ln_mean": -0.1609,
+      "bps_ln_sd": 1.75
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.343,
+       "2": 0.143,
+       "3": 0.0881,
+       "4": 0.06,
+       "5": 0.0408,
+       "6": 0.0356,
+       "7": 0.026,
+       "8": 0.0205,
+       "9": 0.0162,
+       "10": 0.0141,
+       ">10": 0.213
+      },
+      "ticks_p50": 3.0,
+      "ticks_p75": 8.0,
+      "ticks_p90": 68.0,
+      "ticks_p95": 403.0,
+      "ticks_p99": 10046.0,
+      "bps_p10": 0.198,
+      "bps_p50": 0.863,
+      "bps_p90": 28.5,
+      "bps_ln_mean": 0.4142,
+      "bps_ln_sd": 2.16
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 0.237,
+     "p50": 0.659,
+     "p90": 3.63
+    }
+   },
+   "levels_per_side": {
+    "share_20": 0.726,
+    "share_lt10": 0.0566,
+    "share_0": 0,
+    "p10": 11.0,
+    "p50": 20.0,
+    "mean": 18.1
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 0.515,
+     "p25": 1.44,
+     "p50": 2.13,
+     "p75": 2.66,
+     "p90": 3.26
+    },
+    "2": {
+     "p10": 1.4,
+     "p25": 2.4,
+     "p50": 3.07,
+     "p75": 3.8,
+     "p90": 4.59
+    },
+    "3": {
+     "p10": 1.89,
+     "p25": 2.98,
+     "p50": 3.8,
+     "p75": 4.78,
+     "p90": 5.86
+    },
+    "5": {
+     "p10": 2.64,
+     "p25": 3.96,
+     "p50": 5.2,
+     "p75": 6.75,
+     "p90": 9.5
+    },
+    "10": {
+     "p10": 4.3,
+     "p25": 6.35,
+     "p50": 8.89,
+     "p75": 15.0,
+     "p90": 30.0
+    },
+    "15": {
+     "p10": 6.31,
+     "p25": 8.85,
+     "p50": 13.0,
+     "p75": 25.0,
+     "p90": 130.0
+    },
+    "20": {
+     "p10": 8.38,
+     "p25": 11.6,
+     "p50": 17.4,
+     "p75": 34.6,
+     "p90": 81.5
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 11.1,
+     "p10": 71.2,
+     "p25": 1020.0,
+     "p50": 25700.0,
+     "p75": 88500.0,
+     "p90": 176000.0,
+     "p95": 280000.0,
+     "p99": 722000.0,
+     "ln_mean": 9.108,
+     "ln_sd": 3.03
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 140.0,
+     "p10": 262.0,
+     "p25": 5000.0,
+     "p50": 37500.0,
+     "p75": 100000.0,
+     "p90": 187000.0,
+     "p95": 292000.0,
+     "p99": 743000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 237.0,
+      "p50": 1000.0,
+      "p90": 24100.0,
+      "dust_share": 0.0555,
+      "nondust_ln_mean": 7.494,
+      "nondust_ln_sd": 1.92
+     },
+     "2": {
+      "p10": 247.0,
+      "p50": 6300.0,
+      "p90": 100000.0,
+      "dust_share": 0.0183,
+      "nondust_ln_mean": 8.55,
+      "nondust_ln_sd": 2.32
+     },
+     "3": {
+      "p10": 275.0,
+      "p50": 24900.0,
+      "p90": 158000.0,
+      "dust_share": 0.0151,
+      "nondust_ln_mean": 9.639,
+      "nondust_ln_sd": 2.29
+     },
+     "4": {
+      "p10": 393.0,
+      "p50": 49300.0,
+      "p90": 224000.0,
+      "dust_share": 0.0228,
+      "nondust_ln_mean": 10.17,
+      "nondust_ln_sd": 2.21
+     },
+     "5": {
+      "p10": 318.0,
+      "p50": 50600.0,
+      "p90": 257000.0,
+      "dust_share": 0.04,
+      "nondust_ln_mean": 10.41,
+      "nondust_ln_sd": 2.14
+     },
+     "6": {
+      "p10": 260.0,
+      "p50": 50800.0,
+      "p90": 262000.0,
+      "dust_share": 0.069,
+      "nondust_ln_mean": 10.63,
+      "nondust_ln_sd": 1.92
+     },
+     "7": {
+      "p10": 82.8,
+      "p50": 50900.0,
+      "p90": 251000.0,
+      "dust_share": 0.0841,
+      "nondust_ln_mean": 10.63,
+      "nondust_ln_sd": 1.96
+     },
+     "8": {
+      "p10": 20.0,
+      "p50": 50800.0,
+      "p90": 237000.0,
+      "dust_share": 0.0971,
+      "nondust_ln_mean": 10.58,
+      "nondust_ln_sd": 2.03
+     },
+     "9": {
+      "p10": 21.2,
+      "p50": 50600.0,
+      "p90": 204000.0,
+      "dust_share": 0.0958,
+      "nondust_ln_mean": 10.39,
+      "nondust_ln_sd": 2.11
+     },
+     "10": {
+      "p10": 13.2,
+      "p50": 49800.0,
+      "p90": 201000.0,
+      "dust_share": 0.0994,
+      "nondust_ln_mean": 10.12,
+      "nondust_ln_sd": 2.27
+     },
+     "11": {
+      "p10": 11.3,
+      "p50": 30100.0,
+      "p90": 175000.0,
+      "dust_share": 0.111,
+      "nondust_ln_mean": 9.879,
+      "nondust_ln_sd": 2.37
+     },
+     "12": {
+      "p10": 11.4,
+      "p50": 25500.0,
+      "p90": 151000.0,
+      "dust_share": 0.107,
+      "nondust_ln_mean": 9.677,
+      "nondust_ln_sd": 2.46
+     },
+     "13": {
+      "p10": 11.4,
+      "p50": 25500.0,
+      "p90": 150000.0,
+      "dust_share": 0.0988,
+      "nondust_ln_mean": 9.544,
+      "nondust_ln_sd": 2.53
+     },
+     "14": {
+      "p10": 30.9,
+      "p50": 25500.0,
+      "p90": 149000.0,
+      "dust_share": 0.0887,
+      "nondust_ln_mean": 9.486,
+      "nondust_ln_sd": 2.51
+     },
+     "15": {
+      "p10": 50.8,
+      "p50": 25500.0,
+      "p90": 148000.0,
+      "dust_share": 0.0825,
+      "nondust_ln_mean": 9.425,
+      "nondust_ln_sd": 2.53
+     },
+     "16": {
+      "p10": 32.5,
+      "p50": 25400.0,
+      "p90": 136000.0,
+      "dust_share": 0.0865,
+      "nondust_ln_mean": 9.351,
+      "nondust_ln_sd": 2.56
+     },
+     "17": {
+      "p10": 30.5,
+      "p50": 25400.0,
+      "p90": 114000.0,
+      "dust_share": 0.089,
+      "nondust_ln_mean": 9.319,
+      "nondust_ln_sd": 2.55
+     },
+     "18": {
+      "p10": 30.2,
+      "p50": 25200.0,
+      "p90": 102000.0,
+      "dust_share": 0.0894,
+      "nondust_ln_mean": 9.238,
+      "nondust_ln_sd": 2.53
+     },
+     "19": {
+      "p10": 20.5,
+      "p50": 20900.0,
+      "p90": 102000.0,
+      "dust_share": 0.0941,
+      "nondust_ln_mean": 9.134,
+      "nondust_ln_sd": 2.53
+     },
+     "20": {
+      "p10": 11.5,
+      "p50": 15900.0,
+      "p90": 101000.0,
+      "dust_share": 0.101,
+      "nondust_ln_mean": 9.017,
+      "nondust_ln_sd": 2.53
+     }
+    },
+    "median_vs_level_powerlaw_beta": 0.582,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 237.0,
+      "p50": 1000.0,
+      "p90": 24100.0
+     },
+     "5": {
+      "p10": 25300.0,
+      "p50": 225000.0,
+      "p90": 827000.0
+     },
+     "10": {
+      "p10": 178000.0,
+      "p50": 762000.0,
+      "p90": 1610000.0
+     },
+     "20": {
+      "p10": 671000.0,
+      "p50": 1500000.0,
+      "p90": 2480000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 2750.0,
+     "p50": 25400.0,
+     "p90": 81500.0,
+     "lognormal_mu": 9.804,
+     "lognormal_sigma": 1.61
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.0755,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 2,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.226,
+       "mu_ln_usd": 5.79,
+       "sigma_ln": 1.3,
+       "median_usd": 327.0
+      },
+      {
+       "weight": 0.774,
+       "mu_ln_usd": 10.79,
+       "sigma_ln": 1.23,
+       "median_usd": 48400.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      69.7,
+      1140.0,
+      25600.0,
+      78100.0,
+      184000.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      71.2,
+      1020.0,
+      25700.0,
+      88500.0,
+      176000.0
+     ],
+     "max_abs_log_error": 0.125
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.0755,
+     "clips": [
+      {
+       "usd": 280.0,
+       "window_usd": [
+        257,
+        302
+       ],
+       "share": 0.0385,
+       "n_markets": 47
+      },
+      {
+       "usd": 8000.0,
+       "window_usd": [
+        7413,
+        8710
+       ],
+       "share": 0.033,
+       "n_markets": 48
+      },
+      {
+       "usd": 9900.0,
+       "window_usd": [
+        9120,
+        10715
+       ],
+       "share": 0.0347,
+       "n_markets": 48
+      },
+      {
+       "usd": 15700.0,
+       "window_usd": [
+        14454,
+        16982
+       ],
+       "share": 0.0309,
+       "n_markets": 43
+      },
+      {
+       "usd": 25400.0,
+       "window_usd": [
+        23442,
+        27542
+       ],
+       "share": 0.0483,
+       "n_markets": 41
+      },
+      {
+       "usd": 40300.0,
+       "window_usd": [
+        37154,
+        43652
+       ],
+       "share": 0.0383,
+       "n_markets": 42
+      },
+      {
+       "usd": 50700.0,
+       "window_usd": [
+        46774,
+        54954
+       ],
+       "share": 0.1113,
+       "n_markets": 44
+      },
+      {
+       "usd": 105900.0,
+       "window_usd": [
+        97724,
+        114815
+       ],
+       "share": 0.0872,
+       "n_markets": 42
+      },
+      {
+       "usd": 149600.0,
+       "window_usd": [
+        138038,
+        162181
+       ],
+       "share": 0.03,
+       "n_markets": 43
+      },
+      {
+       "usd": 188400.0,
+       "window_usd": [
+        173780,
+        204174
+       ],
+       "share": 0.0359,
+       "n_markets": 41
+      }
+     ],
+     "clip_total_share": 0.4881,
+     "background_share": 0.4365,
+     "background_lognormal": {
+      "mu_ln_usd": 8.932,
+      "sigma_ln": 2.914,
+      "median_usd": 7570
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.0755,
+    "share_levels_below_10_usd": 0.000605,
+    "share_by_level_k": {
+     "1": 0.0555,
+     "2": 0.0183,
+     "3": 0.0151,
+     "5": 0.04,
+     "10": 0.0994,
+     "15": 0.0825,
+     "20": 0.101
+    },
+    "dist_from_mid_bps": {
+     "p10": 6.43,
+     "p25": 12.1,
+     "p50": 19.5,
+     "p75": 27.5,
+     "p90": 35.1
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.804
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.367,
+    "share_nondust_levels_size_repeated_same_side": 0.331,
+    "share_levels_size_appears_on_other_side": 0.388,
+    "share_levels_in_adjacent_identical_run": 0.188,
+    "share_levels_in_adjacent_identical_run_nondust": 0.164,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.0768,
+    "multiplicity_share_of_levels": {
+     "1": 0.633,
+     "2": 0.142,
+     "3": 0.112,
+     "4+": 0.114
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.854,
+     "3": 0.406,
+     "4": 0.0596,
+     "5+": 0.0402
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.777,
+     "3": 0.317,
+     "4": 0.0595,
+     "5+": 0.0402
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 8.11,
+     "level_changes_incl_fill_per_s": 8.12,
+     "naive_window_changes_per_s": 9.33,
+     "mix": {
+      "add": 0.358,
+      "remove": 0.357,
+      "size_up": 0.144,
+      "size_down": 0.14
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.452,
+      "6-10": 0.291,
+      "11-20": 0.257
+     },
+     "trades_per_s": 0.00409,
+     "n_trades": 2121,
+     "nonfill_changes_per_trade": 1982.0,
+     "cancel_like_changes_per_trade": 986.6,
+     "share_seconds_no_level_change": 0.446,
+     "share_seconds_best_price_moved": 0.293,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 0.0,
+      "p50": 2.0,
+      "p90": 28.0,
+      "p99": 51.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.446,
+      "1-2": 0.105,
+      "3-5": 0.0847,
+      "6-10": 0.103,
+      "11-20": 0.109,
+      "21-40": 0.113,
+      "41+": 0.0384
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.746
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 6.39,
+     "mix": {
+      "add": 0.335,
+      "remove": 0.335,
+      "size_up": 0.166,
+      "size_down": 0.163
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.474,
+      "6-10": 0.288,
+      "11-20": 0.238
+     },
+     "trades_per_s": 0.00312,
+     "n_trades": 11321,
+     "nonfill_changes_per_trade": 2048.0,
+     "cancel_like_changes_per_trade": 1020.0,
+     "share_seconds_no_level_change": 0.475,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.475,
+      "1-2": 0.111,
+      "3-5": 0.0909,
+      "6-10": 0.11,
+      "11-20": 0.108,
+      "21-40": 0.0862,
+      "41+": 0.0193
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 389.3,
+     "trades": 0.1963
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 306.7,
+     "trades": 0.1498
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 2.19,
+     "p50": 5.49,
+     "p90": 12.4,
+     "min": 0.456,
+     "max": 15.0,
+     "lognormal_mu": 1.649,
+     "lognormal_sigma": 0.706
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 48,
+     "p10": 0.000367,
+     "p50": 0.00202,
+     "p90": 0.00601,
+     "min": 9.27e-05,
+     "max": 0.0175,
+     "lognormal_mu": -6.269,
+     "lognormal_sigma": 1.1
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 48,
+     "p10": 854.0,
+     "p50": 2550.0,
+     "p90": 9420.0,
+     "min": 112.0,
+     "max": 38100.0,
+     "lognormal_mu": 7.918,
+     "lognormal_sigma": 1.15
+    }
+   }
+  }
+ },
+ "supplementary_subclasses": {
+  "tradfi_macro": {
+   "n_markets": 6,
+   "markets": [
+    "SP500-USD",
+    "GOLD-USD",
+    "WTIOIL-USD",
+    "NAS100-USD",
+    "SILVER-USD",
+    "BRENTOIL-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 64806,
+    "levels": 2592239
+   },
+   "real_tick_bps": {
+    "p10": 0.103,
+    "p50": 0.132,
+    "p90": 0.327
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 1.0,
+     "p25": 1.0,
+     "p50": 7.0,
+     "p75": 16.0,
+     "p90": 44.0,
+     "p99": 59.0,
+     "mean": 13.2,
+     "pmf": {
+      "1": 0.434,
+      "2": 0.00386,
+      "3": 0.0129,
+      "4": 0.0179,
+      "5": 0.0135,
+      "6": 0.0168,
+      "7": 0.019,
+      "8": 0.0206,
+      "9": 0.0323,
+      "10": 0.059,
+      "11": 0.0178,
+      "12": 0.0186,
+      ">12": 0.334
+     }
+    },
+    "bps": {
+     "p10": 0.131,
+     "p25": 0.238,
+     "p50": 1.04,
+     "p75": 2.5,
+     "p90": 4.55,
+     "p99": 6.16,
+     "ln_mean": -0.2231,
+     "ln_sd": 1.3
+    },
+    "market_median_bps_across_markets": {
+     "p10": 0.184,
+     "p50": 0.73,
+     "p90": 3.29,
+     "min": 0.131,
+     "max": 4.46
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 1.0,
+     "p50": 5.5,
+     "p90": 28.5,
+     "min": 1.0,
+     "max": 44.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 1.0,
+     "p50": 1.0,
+     "p75": 3.0,
+     "p90": 7.0,
+     "p95": 11.0,
+     "p99": 27.0,
+     "mean": 3.36,
+     "pmf": {
+      "1": 0.529,
+      "2": 0.155,
+      "3": 0.0869,
+      "4": 0.0559,
+      "5": 0.0369,
+      "6": 0.0254,
+      "7": 0.0196,
+      "8": 0.0153,
+      "9": 0.0123,
+      "10": 0.00908,
+      ">10": 0.0543
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.112,
+     "p25": 0.164,
+     "p50": 0.311,
+     "p75": 0.517,
+     "p90": 0.993,
+     "p99": 3.05
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.59,
+       "2": 0.114,
+       "3": 0.0725,
+       "4": 0.0505,
+       "5": 0.0354,
+       "6": 0.0259,
+       "7": 0.0194,
+       "8": 0.0163,
+       "9": 0.0136,
+       "10": 0.00885,
+       ">10": 0.0535
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 3.0,
+      "ticks_p90": 7.0,
+      "ticks_p95": 11.0,
+      "ticks_p99": 23.0,
+      "bps_p10": 0.111,
+      "bps_p50": 0.24,
+      "bps_p90": 0.988,
+      "bps_ln_mean": -1.208,
+      "bps_ln_sd": 0.805
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.632,
+       "2": 0.141,
+       "3": 0.0725,
+       "4": 0.0438,
+       "5": 0.0294,
+       "6": 0.0188,
+       "7": 0.0137,
+       "8": 0.00981,
+       "9": 0.00748,
+       "10": 0.0063,
+       ">10": 0.0248
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 2.0,
+      "ticks_p90": 5.0,
+      "ticks_p95": 7.0,
+      "ticks_p99": 15.0,
+      "bps_p10": 0.111,
+      "bps_p50": 0.238,
+      "bps_p90": 0.658,
+      "bps_ln_mean": -1.347,
+      "bps_ln_sd": 0.681
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.453,
+       "2": 0.179,
+       "3": 0.1,
+       "4": 0.0641,
+       "5": 0.0413,
+       "6": 0.0284,
+       "7": 0.0226,
+       "8": 0.0177,
+       "9": 0.0141,
+       "10": 0.0106,
+       ">10": 0.0694
+      },
+      "ticks_p50": 2.0,
+      "ticks_p75": 4.0,
+      "ticks_p90": 8.0,
+      "ticks_p95": 13.0,
+      "ticks_p99": 37.0,
+      "bps_p10": 0.113,
+      "bps_p50": 0.326,
+      "bps_p90": 1.19,
+      "bps_ln_mean": -1.028,
+      "bps_ln_sd": 0.882
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 0.149,
+     "p50": 0.231,
+     "p90": 0.317
+    }
+   },
+   "levels_per_side": {
+    "share_20": 1.0,
+    "share_lt10": 0,
+    "share_0": 0,
+    "p10": 20.0,
+    "p50": 20.0,
+    "mean": 20.0
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 0.0655,
+     "p25": 0.119,
+     "p50": 0.523,
+     "p75": 1.25,
+     "p90": 2.28
+    },
+    "2": {
+     "p10": 0.363,
+     "p25": 0.724,
+     "p50": 1.29,
+     "p75": 2.18,
+     "p90": 3.05
+    },
+    "3": {
+     "p10": 0.821,
+     "p25": 1.16,
+     "p50": 1.74,
+     "p75": 2.64,
+     "p90": 3.58
+    },
+    "5": {
+     "p10": 1.31,
+     "p25": 1.78,
+     "p50": 2.25,
+     "p75": 3.26,
+     "p90": 4.28
+    },
+    "10": {
+     "p10": 2.57,
+     "p25": 3.14,
+     "p50": 3.9,
+     "p75": 5.04,
+     "p90": 6.49
+    },
+    "15": {
+     "p10": 3.94,
+     "p25": 4.9,
+     "p50": 6.33,
+     "p75": 7.67,
+     "p90": 9.12
+    },
+    "20": {
+     "p10": 6.09,
+     "p25": 7.11,
+     "p50": 8.87,
+     "p75": 11.1,
+     "p90": 14.0
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 262.0,
+     "p10": 1500.0,
+     "p25": 25200.0,
+     "p50": 51100.0,
+     "p75": 102000.0,
+     "p90": 251000.0,
+     "p95": 496000.0,
+     "p99": 812000.0,
+     "ln_mean": 10.47,
+     "ln_sd": 2.17
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 880.0,
+     "p10": 2930.0,
+     "p25": 25400.0,
+     "p50": 51200.0,
+     "p75": 105000.0,
+     "p90": 254000.0,
+     "p95": 498000.0,
+     "p99": 819000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 449.0,
+      "p50": 2920.0,
+      "p90": 30800.0,
+      "dust_share": 0.0133,
+      "nondust_ln_mean": 8.153,
+      "nondust_ln_sd": 1.49
+     },
+     "2": {
+      "p10": 375.0,
+      "p50": 30300.0,
+      "p90": 102000.0,
+      "dust_share": 0.0147,
+      "nondust_ln_mean": 9.499,
+      "nondust_ln_sd": 2.06
+     },
+     "3": {
+      "p10": 1290.0,
+      "p50": 50700.0,
+      "p90": 154000.0,
+      "dust_share": 0.011,
+      "nondust_ln_mean": 10.52,
+      "nondust_ln_sd": 1.81
+     },
+     "4": {
+      "p10": 8050.0,
+      "p50": 98500.0,
+      "p90": 228000.0,
+      "dust_share": 0.0076,
+      "nondust_ln_mean": 11.03,
+      "nondust_ln_sd": 1.5
+     },
+     "5": {
+      "p10": 8050.0,
+      "p50": 98100.0,
+      "p90": 301000.0,
+      "dust_share": 0.00706,
+      "nondust_ln_mean": 11.07,
+      "nondust_ln_sd": 1.56
+     },
+     "6": {
+      "p10": 8020.0,
+      "p50": 75300.0,
+      "p90": 500000.0,
+      "dust_share": 0.00969,
+      "nondust_ln_mean": 11.03,
+      "nondust_ln_sd": 1.7
+     },
+     "7": {
+      "p10": 7960.0,
+      "p50": 61400.0,
+      "p90": 499000.0,
+      "dust_share": 0.0108,
+      "nondust_ln_mean": 10.96,
+      "nondust_ln_sd": 1.8
+     },
+     "8": {
+      "p10": 7420.0,
+      "p50": 59900.0,
+      "p90": 492000.0,
+      "dust_share": 0.0102,
+      "nondust_ln_mean": 10.86,
+      "nondust_ln_sd": 1.88
+     },
+     "9": {
+      "p10": 5930.0,
+      "p50": 59900.0,
+      "p90": 458000.0,
+      "dust_share": 0.00963,
+      "nondust_ln_mean": 10.8,
+      "nondust_ln_sd": 1.94
+     },
+     "10": {
+      "p10": 5370.0,
+      "p50": 59400.0,
+      "p90": 411000.0,
+      "dust_share": 0.0108,
+      "nondust_ln_mean": 10.74,
+      "nondust_ln_sd": 1.95
+     },
+     "11": {
+      "p10": 3000.0,
+      "p50": 59200.0,
+      "p90": 408000.0,
+      "dust_share": 0.0141,
+      "nondust_ln_mean": 10.73,
+      "nondust_ln_sd": 1.97
+     },
+     "12": {
+      "p10": 2890.0,
+      "p50": 60200.0,
+      "p90": 406000.0,
+      "dust_share": 0.0168,
+      "nondust_ln_mean": 10.77,
+      "nondust_ln_sd": 1.93
+     },
+     "13": {
+      "p10": 2640.0,
+      "p50": 61200.0,
+      "p90": 404000.0,
+      "dust_share": 0.0198,
+      "nondust_ln_mean": 10.81,
+      "nondust_ln_sd": 1.88
+     },
+     "14": {
+      "p10": 2660.0,
+      "p50": 61400.0,
+      "p90": 399000.0,
+      "dust_share": 0.0237,
+      "nondust_ln_mean": 10.84,
+      "nondust_ln_sd": 1.8
+     },
+     "15": {
+      "p10": 3010.0,
+      "p50": 61000.0,
+      "p90": 277000.0,
+      "dust_share": 0.0265,
+      "nondust_ln_mean": 10.87,
+      "nondust_ln_sd": 1.66
+     },
+     "16": {
+      "p10": 4810.0,
+      "p50": 60800.0,
+      "p90": 213000.0,
+      "dust_share": 0.029,
+      "nondust_ln_mean": 10.89,
+      "nondust_ln_sd": 1.54
+     },
+     "17": {
+      "p10": 4820.0,
+      "p50": 60400.0,
+      "p90": 202000.0,
+      "dust_share": 0.0333,
+      "nondust_ln_mean": 10.89,
+      "nondust_ln_sd": 1.44
+     },
+     "18": {
+      "p10": 2980.0,
+      "p50": 51200.0,
+      "p90": 196000.0,
+      "dust_share": 0.0405,
+      "nondust_ln_mean": 10.85,
+      "nondust_ln_sd": 1.37
+     },
+     "19": {
+      "p10": 2680.0,
+      "p50": 51100.0,
+      "p90": 177000.0,
+      "dust_share": 0.0498,
+      "nondust_ln_mean": 10.79,
+      "nondust_ln_sd": 1.35
+     },
+     "20": {
+      "p10": 2590.0,
+      "p50": 51000.0,
+      "p90": 191000.0,
+      "dust_share": 0.0642,
+      "nondust_ln_mean": 10.76,
+      "nondust_ln_sd": 1.37
+     }
+    },
+    "median_vs_level_powerlaw_beta": 0.517,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 449.0,
+      "p50": 2920.0,
+      "p90": 30800.0
+     },
+     "5": {
+      "p10": 85400.0,
+      "p50": 315000.0,
+      "p90": 1000000.0
+     },
+     "10": {
+      "p10": 353000.0,
+      "p50": 1100000.0,
+      "p90": 1960000.0
+     },
+     "20": {
+      "p10": 1110000.0,
+      "p50": 2290000.0,
+      "p90": 3440000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 37900.0,
+     "p50": 51200.0,
+     "p90": 101000.0,
+     "lognormal_mu": 10.95,
+     "lognormal_sigma": 0.472
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.0211,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 3,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.235,
+       "mu_ln_usd": 8.292,
+       "sigma_ln": 2.04,
+       "median_usd": 3990.0
+      },
+      {
+       "weight": 0.308,
+       "mu_ln_usd": 11.15,
+       "sigma_ln": 0.532,
+       "median_usd": 69900.0
+      },
+      {
+       "weight": 0.458,
+       "mu_ln_usd": 11.5,
+       "sigma_ln": 1.14,
+       "median_usd": 99000.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      1740.0,
+      21700.0,
+      60600.0,
+      120000.0,
+      249000.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      1500.0,
+      25200.0,
+      51100.0,
+      102000.0,
+      251000.0
+     ],
+     "max_abs_log_error": 0.171
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.0211,
+     "clips": [
+      {
+       "usd": 7500.0,
+       "window_usd": [
+        6918,
+        8128
+       ],
+       "share": 0.0275,
+       "n_markets": 6
+      },
+      {
+       "usd": 15700.0,
+       "window_usd": [
+        14454,
+        16982
+       ],
+       "share": 0.0264,
+       "n_markets": 6
+      },
+      {
+       "usd": 25400.0,
+       "window_usd": [
+        23442,
+        27542
+       ],
+       "share": 0.0562,
+       "n_markets": 4
+      },
+      {
+       "usd": 30500.0,
+       "window_usd": [
+        28184,
+        33113
+       ],
+       "share": 0.0263,
+       "n_markets": 6
+      },
+      {
+       "usd": 37600.0,
+       "window_usd": [
+        34674,
+        40738
+       ],
+       "share": 0.0289,
+       "n_markets": 6
+      },
+      {
+       "usd": 50700.0,
+       "window_usd": [
+        46774,
+        54954
+       ],
+       "share": 0.1486,
+       "n_markets": 6
+      },
+      {
+       "usd": 61000.0,
+       "window_usd": [
+        56234,
+        66069
+       ],
+       "share": 0.0266,
+       "n_markets": 6
+      },
+      {
+       "usd": 80400.0,
+       "window_usd": [
+        74131,
+        87096
+       ],
+       "share": 0.0278,
+       "n_markets": 6
+      },
+      {
+       "usd": 101200.0,
+       "window_usd": [
+        93325,
+        109648
+       ],
+       "share": 0.1469,
+       "n_markets": 6
+      },
+      {
+       "usd": 160300.0,
+       "window_usd": [
+        147911,
+        173780
+       ],
+       "share": 0.0602,
+       "n_markets": 6
+      }
+     ],
+     "clip_total_share": 0.5754,
+     "background_share": 0.4035,
+     "background_lognormal": {
+      "mu_ln_usd": 10.265,
+      "sigma_ln": 2.676,
+      "median_usd": 28718
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.0211,
+    "share_levels_below_10_usd": 0,
+    "share_by_level_k": {
+     "1": 0.0133,
+     "2": 0.0147,
+     "3": 0.011,
+     "5": 0.00706,
+     "10": 0.0108,
+     "15": 0.0265,
+     "20": 0.0642
+    },
+    "dist_from_mid_bps": {
+     "p10": 2.7,
+     "p25": 4.79,
+     "p50": 7.92,
+     "p75": 12.0,
+     "p90": 19.6
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.26
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.343,
+    "share_nondust_levels_size_repeated_same_side": 0.344,
+    "share_levels_size_appears_on_other_side": 0.402,
+    "share_levels_in_adjacent_identical_run": 0.162,
+    "share_levels_in_adjacent_identical_run_nondust": 0.162,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.0942,
+    "multiplicity_share_of_levels": {
+     "1": 0.657,
+     "2": 0.132,
+     "3": 0.072,
+     "4+": 0.139
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.989,
+     "3": 0.296,
+     "4": 0.057,
+     "5+": 0.0282
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.985,
+     "3": 0.296,
+     "4": 0.057,
+     "5+": 0.0282
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 11.6,
+     "level_changes_incl_fill_per_s": 11.6,
+     "naive_window_changes_per_s": 13.7,
+     "mix": {
+      "add": 0.331,
+      "remove": 0.332,
+      "size_up": 0.17,
+      "size_down": 0.167
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.449,
+      "6-10": 0.292,
+      "11-20": 0.259
+     },
+     "trades_per_s": 0.00676,
+     "n_trades": 438,
+     "nonfill_changes_per_trade": 1713.0,
+     "cancel_like_changes_per_trade": 854.3,
+     "share_seconds_no_level_change": 0.241,
+     "share_seconds_best_price_moved": 0.376,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 0.0,
+      "p50": 7.0,
+      "p90": 31.0,
+      "p99": 49.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.241,
+      "1-2": 0.102,
+      "3-5": 0.0999,
+      "6-10": 0.15,
+      "11-20": 0.188,
+      "21-40": 0.18,
+      "41+": 0.0382
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.767
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 10.3,
+     "mix": {
+      "add": 0.329,
+      "remove": 0.33,
+      "size_up": 0.171,
+      "size_down": 0.17
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.45,
+      "6-10": 0.295,
+      "11-20": 0.255
+     },
+     "trades_per_s": 0.00649,
+     "n_trades": 2940,
+     "nonfill_changes_per_trade": 1584.0,
+     "cancel_like_changes_per_trade": 792.0,
+     "share_seconds_no_level_change": 0.274,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.274,
+      "1-2": 0.112,
+      "3-5": 0.107,
+      "6-10": 0.152,
+      "11-20": 0.172,
+      "21-40": 0.147,
+      "41+": 0.0349
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 69.6,
+     "trades": 0.04056
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 61.8,
+     "trades": 0.03894
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 7.51,
+     "p50": 9.87,
+     "p90": 13.4,
+     "min": 7.3,
+     "max": 14.1,
+     "lognormal_mu": 2.296,
+     "lognormal_sigma": 0.259
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 6,
+     "p10": 0.00323,
+     "p50": 0.00455,
+     "p90": 0.0117,
+     "min": 0.00322,
+     "max": 0.0158,
+     "lognormal_mu": -5.217,
+     "lognormal_sigma": 0.56
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 6,
+     "p10": 928.0,
+     "p50": 2020.0,
+     "p90": 3360.0,
+     "min": 891.0,
+     "max": 3580.0,
+     "lognormal_mu": 7.513,
+     "lognormal_sigma": 0.54
+    }
+   }
+  },
+  "tradfi_equities": {
+   "n_markets": 42,
+   "markets": [
+    "SPCX-USD",
+    "MU-USD",
+    "SKHY-USD",
+    "SKHYNIX-USD",
+    "AAPL-USD",
+    "MSFT-USD",
+    "GOOG-USD",
+    "AMZN-USD",
+    "NVDA-USD",
+    "META-USD",
+    "TSLA-USD",
+    "AMD-USD",
+    "INTC-USD",
+    "AVGO-USD",
+    "QCOM-USD",
+    "ARM-USD",
+    "TSM-USD",
+    "ASML-USD",
+    "SNDK-USD",
+    "DRAM-USD",
+    "HOOD-USD",
+    "MSTR-USD",
+    "STRC-USD",
+    "CRCL-USD",
+    "COIN-USD",
+    "RKLB-USD",
+    "LITE-USD",
+    "NBIS-USD",
+    "ORCL-USD",
+    "PLTR-USD",
+    "BABA-USD",
+    "ZM-USD",
+    "DELL-USD",
+    "CXMT-USD",
+    "SAMSUNG-USD",
+    "CRWV-USD",
+    "CBRS-USD",
+    "MRVL-USD",
+    "EWY-USD",
+    "NCLD-USD",
+    "SOXL-USD",
+    "UNITREE-USD"
+   ],
+   "sample_core3": {
+    "book_snapshots": 453642,
+    "levels": 16146862
+   },
+   "real_tick_bps": {
+    "p10": 0.119,
+    "p50": 0.415,
+    "p90": 0.853
+   },
+   "spread": {
+    "real_ticks": {
+     "p10": 4.0,
+     "p25": 7.0,
+     "p50": 11.0,
+     "p75": 21.0,
+     "p90": 34.0,
+     "p99": 64.0,
+     "mean": 15.6,
+     "pmf": {
+      "1": 0.03,
+      "2": 0.0134,
+      "3": 0.0213,
+      "4": 0.0378,
+      "5": 0.0565,
+      "6": 0.0726,
+      "7": 0.0779,
+      "8": 0.0695,
+      "9": 0.0582,
+      "10": 0.0496,
+      "11": 0.0444,
+      "12": 0.0449,
+      ">12": 0.424
+     }
+    },
+    "bps": {
+     "p10": 2.15,
+     "p25": 3.42,
+     "p50": 4.43,
+     "p75": 5.45,
+     "p90": 6.64,
+     "p99": 10.2,
+     "ln_mean": 1.371,
+     "ln_sd": 0.653
+    },
+    "market_median_bps_across_markets": {
+     "p10": 3.36,
+     "p50": 4.41,
+     "p90": 5.64,
+     "min": 3.03,
+     "max": 8.99
+    },
+    "market_median_real_ticks_across_markets": {
+     "p10": 6.0,
+     "p50": 11.0,
+     "p90": 30.9,
+     "min": 5.0,
+     "max": 47.0
+    }
+   },
+   "gap_between_levels": {
+    "real_ticks_all_levels": {
+     "p25": 1.0,
+     "p50": 2.0,
+     "p75": 6.0,
+     "p90": 32.0,
+     "p95": 183.0,
+     "p99": 7934.0,
+     "mean": 311.0,
+     "pmf": {
+      "1": 0.447,
+      "2": 0.13,
+      "3": 0.0755,
+      "4": 0.0499,
+      "5": 0.034,
+      "6": 0.0282,
+      "7": 0.0208,
+      "8": 0.0177,
+      "9": 0.0126,
+      "10": 0.0113,
+      ">10": 0.173
+     }
+    },
+    "bps_all_levels": {
+     "p10": 0.209,
+     "p25": 0.412,
+     "p50": 0.796,
+     "p75": 2.26,
+     "p90": 10.0,
+     "p99": 3780.0
+    },
+    "by_level_index": {
+     "1-4": {
+      "ticks_pmf": {
+       "1": 0.576,
+       "2": 0.127,
+       "3": 0.0738,
+       "4": 0.0468,
+       "5": 0.0313,
+       "6": 0.0226,
+       "7": 0.0171,
+       "8": 0.0127,
+       "9": 0.0101,
+       "10": 0.00902,
+       ">10": 0.0743
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 3.0,
+      "ticks_p90": 8.0,
+      "ticks_p95": 15.0,
+      "ticks_p99": 48.0,
+      "bps_p10": 0.165,
+      "bps_p50": 0.662,
+      "bps_p90": 2.19,
+      "bps_ln_mean": -0.3732,
+      "bps_ln_sd": 1.02
+     },
+     "5-9": {
+      "ticks_pmf": {
+       "1": 0.542,
+       "2": 0.123,
+       "3": 0.0597,
+       "4": 0.0374,
+       "5": 0.0253,
+       "6": 0.0188,
+       "7": 0.0143,
+       "8": 0.0166,
+       "9": 0.00815,
+       "10": 0.00733,
+       ">10": 0.147
+      },
+      "ticks_p50": 1.0,
+      "ticks_p75": 4.0,
+      "ticks_p90": 25.0,
+      "ticks_p95": 80.0,
+      "ticks_p99": 9058.0,
+      "bps_p10": 0.197,
+      "bps_p50": 0.667,
+      "bps_p90": 7.02,
+      "bps_ln_mean": 0.01314,
+      "bps_ln_sd": 1.79
+     },
+     "10-19": {
+      "ticks_pmf": {
+       "1": 0.324,
+       "2": 0.136,
+       "3": 0.086,
+       "4": 0.0592,
+       "5": 0.0407,
+       "6": 0.0369,
+       "7": 0.0266,
+       "8": 0.021,
+       "9": 0.0166,
+       "10": 0.0148,
+       ">10": 0.238
+      },
+      "ticks_p50": 3.0,
+      "ticks_p75": 10.0,
+      "ticks_p90": 109.0,
+      "ticks_p95": 649.0,
+      "ticks_p99": 10557.0,
+      "bps_p10": 0.269,
+      "bps_p50": 1.13,
+      "bps_p90": 62.8,
+      "bps_ln_mean": 0.674,
+      "bps_ln_sd": 2.21
+     }
+    },
+    "market_median_gap_bps_across_markets": {
+     "p10": 0.31,
+     "p50": 0.838,
+     "p90": 3.76
+    }
+   },
+   "levels_per_side": {
+    "share_20": 0.687,
+    "share_lt10": 0.0646,
+    "share_0": 0,
+    "p10": 11.0,
+    "p50": 20.0,
+    "mean": 17.8
+   },
+   "distance_from_mid_bps_by_level": {
+    "1": {
+     "p10": 1.07,
+     "p25": 1.71,
+     "p50": 2.22,
+     "p75": 2.72,
+     "p90": 3.32
+    },
+    "2": {
+     "p10": 2.06,
+     "p25": 2.64,
+     "p50": 3.24,
+     "p75": 3.95,
+     "p90": 4.67
+    },
+    "3": {
+     "p10": 2.65,
+     "p25": 3.25,
+     "p50": 4.03,
+     "p75": 4.97,
+     "p90": 6.09
+    },
+    "5": {
+     "p10": 3.56,
+     "p25": 4.38,
+     "p50": 5.49,
+     "p75": 7.02,
+     "p90": 10.0
+    },
+    "10": {
+     "p10": 5.76,
+     "p25": 7.22,
+     "p50": 9.85,
+     "p75": 16.2,
+     "p90": 34.1
+    },
+    "15": {
+     "p10": 8.31,
+     "p25": 10.2,
+     "p50": 15.7,
+     "p75": 28.2,
+     "p90": 237.0
+    },
+    "20": {
+     "p10": 10.7,
+     "p25": 14.1,
+     "p50": 21.5,
+     "p75": 39.2,
+     "p90": 120.0
+    }
+   },
+   "depth_usd": {
+    "all_levels_pooled": {
+     "p5": 11.1,
+     "p10": 50.2,
+     "p25": 652.0,
+     "p50": 24900.0,
+     "p75": 75300.0,
+     "p90": 159000.0,
+     "p95": 251000.0,
+     "p99": 690000.0,
+     "ln_mean": 8.89,
+     "ln_sd": 3.09
+    },
+    "all_levels_pooled_excluding_dust": {
+     "p5": 133.0,
+     "p10": 259.0,
+     "p25": 3580.0,
+     "p50": 29500.0,
+     "p75": 87400.0,
+     "p90": 176000.0,
+     "p95": 271000.0,
+     "p99": 718000.0
+    },
+    "by_level_index": {
+     "1": {
+      "p10": 166.0,
+      "p50": 987.0,
+      "p90": 20800.0,
+      "dust_share": 0.0616,
+      "nondust_ln_mean": 7.395,
+      "nondust_ln_sd": 1.96
+     },
+     "2": {
+      "p10": 227.0,
+      "p50": 5040.0,
+      "p90": 90800.0,
+      "dust_share": 0.0189,
+      "nondust_ln_mean": 8.414,
+      "nondust_ln_sd": 2.32
+     },
+     "3": {
+      "p10": 261.0,
+      "p50": 16000.0,
+      "p90": 161000.0,
+      "dust_share": 0.0157,
+      "nondust_ln_mean": 9.512,
+      "nondust_ln_sd": 2.33
+     },
+     "4": {
+      "p10": 297.0,
+      "p50": 40200.0,
+      "p90": 222000.0,
+      "dust_share": 0.025,
+      "nondust_ln_mean": 10.05,
+      "nondust_ln_sd": 2.27
+     },
+     "5": {
+      "p10": 260.0,
+      "p50": 50400.0,
+      "p90": 256000.0,
+      "dust_share": 0.0447,
+      "nondust_ln_mean": 10.31,
+      "nondust_ln_sd": 2.2
+     },
+     "6": {
+      "p10": 156.0,
+      "p50": 50700.0,
+      "p90": 254000.0,
+      "dust_share": 0.0775,
+      "nondust_ln_mean": 10.56,
+      "nondust_ln_sd": 1.94
+     },
+     "7": {
+      "p10": 15.1,
+      "p50": 50800.0,
+      "p90": 238000.0,
+      "dust_share": 0.0946,
+      "nondust_ln_mean": 10.57,
+      "nondust_ln_sd": 1.98
+     },
+     "8": {
+      "p10": 11.2,
+      "p50": 50700.0,
+      "p90": 226000.0,
+      "dust_share": 0.11,
+      "nondust_ln_mean": 10.53,
+      "nondust_ln_sd": 2.04
+     },
+     "9": {
+      "p10": 11.2,
+      "p50": 50400.0,
+      "p90": 203000.0,
+      "dust_share": 0.109,
+      "nondust_ln_mean": 10.33,
+      "nondust_ln_sd": 2.13
+     },
+     "10": {
+      "p10": 11.3,
+      "p50": 39700.0,
+      "p90": 190000.0,
+      "dust_share": 0.113,
+      "nondust_ln_mean": 10.01,
+      "nondust_ln_sd": 2.3
+     },
+     "11": {
+      "p10": 11.2,
+      "p50": 25500.0,
+      "p90": 150000.0,
+      "dust_share": 0.126,
+      "nondust_ln_mean": 9.728,
+      "nondust_ln_sd": 2.4
+     },
+     "12": {
+      "p10": 11.2,
+      "p50": 25000.0,
+      "p90": 111000.0,
+      "dust_share": 0.122,
+      "nondust_ln_mean": 9.478,
+      "nondust_ln_sd": 2.49
+     },
+     "13": {
+      "p10": 11.3,
+      "p50": 24600.0,
+      "p90": 102000.0,
+      "dust_share": 0.112,
+      "nondust_ln_mean": 9.312,
+      "nondust_ln_sd": 2.56
+     },
+     "14": {
+      "p10": 11.5,
+      "p50": 23700.0,
+      "p90": 102000.0,
+      "dust_share": 0.0998,
+      "nondust_ln_mean": 9.233,
+      "nondust_ln_sd": 2.54
+     },
+     "15": {
+      "p10": 21.1,
+      "p50": 20800.0,
+      "p90": 102000.0,
+      "dust_share": 0.0924,
+      "nondust_ln_mean": 9.149,
+      "nondust_ln_sd": 2.57
+     },
+     "16": {
+      "p10": 20.2,
+      "p50": 16400.0,
+      "p90": 102000.0,
+      "dust_share": 0.097,
+      "nondust_ln_mean": 9.048,
+      "nondust_ln_sd": 2.61
+     },
+     "17": {
+      "p10": 13.4,
+      "p50": 16000.0,
+      "p90": 102000.0,
+      "dust_share": 0.0997,
+      "nondust_ln_mean": 8.999,
+      "nondust_ln_sd": 2.61
+     },
+     "18": {
+      "p10": 20.0,
+      "p50": 15200.0,
+      "p90": 101000.0,
+      "dust_share": 0.099,
+      "nondust_ln_mean": 8.901,
+      "nondust_ln_sd": 2.59
+     },
+     "19": {
+      "p10": 11.4,
+      "p50": 10200.0,
+      "p90": 100000.0,
+      "dust_share": 0.103,
+      "nondust_ln_mean": 8.78,
+      "nondust_ln_sd": 2.59
+     },
+     "20": {
+      "p10": 11.4,
+      "p50": 8080.0,
+      "p90": 87600.0,
+      "dust_share": 0.109,
+      "nondust_ln_mean": 8.638,
+      "nondust_ln_sd": 2.56
+     }
+    },
+    "median_vs_level_powerlaw_beta": 0.461,
+    "cumulative_to_level": {
+     "1": {
+      "p10": 166.0,
+      "p50": 987.0,
+      "p90": 20800.0
+     },
+     "5": {
+      "p10": 22200.0,
+      "p50": 209000.0,
+      "p90": 816000.0
+     },
+     "10": {
+      "p10": 137000.0,
+      "p50": 726000.0,
+      "p90": 1550000.0
+     },
+     "20": {
+      "p10": 605000.0,
+      "p50": 1350000.0,
+      "p90": 2330000.0
+     }
+    },
+    "market_median_depth_across_markets": {
+     "p10": 2680.0,
+     "p50": 25400.0,
+     "p90": 74600.0,
+     "lognormal_mu": 9.64,
+     "lognormal_sigma": 1.65
+    },
+    "model_A_dust_plus_lognormal_mixture": {
+     "dust_point_mass_share": 0.0842,
+     "dust_range_usd": [
+      10,
+      12.5
+     ],
+     "n_components": 2,
+     "lognormal_mixture_non_dust": [
+      {
+       "weight": 0.243,
+       "mu_ln_usd": 5.689,
+       "sigma_ln": 1.25,
+       "median_usd": 296.0
+      },
+      {
+       "weight": 0.757,
+       "mu_ln_usd": 10.7,
+       "sigma_ln": 1.24,
+       "median_usd": 44600.0
+      }
+     ],
+     "fit_check_p10_p25_p50_p75_p90": [
+      47.1,
+      670.0,
+      21400.0,
+      69000.0,
+      165000.0
+     ],
+     "empirical_p10_p25_p50_p75_p90": [
+      50.2,
+      652.0,
+      24900.0,
+      75300.0,
+      159000.0
+     ],
+     "max_abs_log_error": 0.151
+    },
+    "model_B_dust_plus_clip_menu_plus_background": {
+     "dust_share": 0.0842,
+     "clips": [
+      {
+       "usd": 280.0,
+       "window_usd": [
+        257,
+        302
+       ],
+       "share": 0.0422,
+       "n_markets": 41
+      },
+      {
+       "usd": 5000.0,
+       "window_usd": [
+        4571,
+        5370
+       ],
+       "share": 0.0204,
+       "n_markets": 42
+      },
+      {
+       "usd": 8000.0,
+       "window_usd": [
+        7413,
+        8710
+       ],
+       "share": 0.0342,
+       "n_markets": 42
+      },
+      {
+       "usd": 9900.0,
+       "window_usd": [
+        9120,
+        10715
+       ],
+       "share": 0.0378,
+       "n_markets": 42
+      },
+      {
+       "usd": 15000.0,
+       "window_usd": [
+        13804,
+        16218
+       ],
+       "share": 0.0328,
+       "n_markets": 37
+      },
+      {
+       "usd": 25400.0,
+       "window_usd": [
+        23442,
+        27542
+       ],
+       "share": 0.047,
+       "n_markets": 37
+      },
+      {
+       "usd": 40300.0,
+       "window_usd": [
+        37154,
+        43652
+       ],
+       "share": 0.0402,
+       "n_markets": 36
+      },
+      {
+       "usd": 50700.0,
+       "window_usd": [
+        46774,
+        54954
+       ],
+       "share": 0.1053,
+       "n_markets": 38
+      },
+      {
+       "usd": 105900.0,
+       "window_usd": [
+        97724,
+        114815
+       ],
+       "share": 0.0774,
+       "n_markets": 36
+      },
+      {
+       "usd": 188400.0,
+       "window_usd": [
+        173780,
+        204174
+       ],
+       "share": 0.0353,
+       "n_markets": 35
+      }
+     ],
+     "clip_total_share": 0.4726,
+     "background_share": 0.443,
+     "background_lognormal": {
+      "mu_ln_usd": 8.895,
+      "sigma_ln": 2.999,
+      "median_usd": 7295
+     }
+    }
+   },
+   "dust_layer": {
+    "share_levels_10_to_12p5_usd": 0.0842,
+    "share_levels_below_10_usd": 0.000702,
+    "share_by_level_k": {
+     "1": 0.0616,
+     "2": 0.0189,
+     "3": 0.0157,
+     "5": 0.0447,
+     "10": 0.113,
+     "15": 0.0924,
+     "20": 0.109
+    },
+    "dist_from_mid_bps": {
+     "p10": 7.08,
+     "p25": 12.6,
+     "p50": 20.0,
+     "p75": 27.8,
+     "p90": 35.4
+    },
+    "share_of_dust_levels_repeating_a_size_same_side": 0.826
+   },
+   "size_repeats": {
+    "share_levels_size_repeated_same_side": 0.371,
+    "share_nondust_levels_size_repeated_same_side": 0.329,
+    "share_levels_size_appears_on_other_side": 0.385,
+    "share_levels_in_adjacent_identical_run": 0.192,
+    "share_levels_in_adjacent_identical_run_nondust": 0.165,
+    "share_levels_size_is_2to5x_another_level_same_side": 0.074,
+    "multiplicity_share_of_levels": {
+     "1": 0.629,
+     "2": 0.143,
+     "3": 0.118,
+     "4+": 0.11
+    },
+    "adjacent_runs_per_side_snapshot": {
+     "2": 0.835,
+     "3": 0.422,
+     "4": 0.06,
+     "5+": 0.0419
+    },
+    "adjacent_runs_per_side_snapshot_nondust": {
+     "2": 0.747,
+     "3": 0.32,
+     "4": 0.0599,
+     "5+": 0.0419
+    }
+   },
+   "requote_1s_lower_bound": {
+    "core3": {
+     "level_changes_nonfill_per_s": 7.62,
+     "level_changes_incl_fill_per_s": 7.62,
+     "naive_window_changes_per_s": 8.72,
+     "mix": {
+      "add": 0.364,
+      "remove": 0.363,
+      "size_up": 0.139,
+      "size_down": 0.134
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.452,
+      "6-10": 0.291,
+      "11-20": 0.257
+     },
+     "trades_per_s": 0.00371,
+     "n_trades": 1683,
+     "nonfill_changes_per_trade": 2053.0,
+     "cancel_like_changes_per_trade": 1021.0,
+     "share_seconds_no_level_change": 0.476,
+     "share_seconds_best_price_moved": 0.281,
+     "nonfill_changes_in_one_second_quantiles": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 27.0,
+      "p99": 51.0
+     },
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.476,
+      "1-2": 0.106,
+      "3-5": 0.0826,
+      "6-10": 0.0964,
+      "11-20": 0.0978,
+      "21-40": 0.104,
+      "41+": 0.0385
+     },
+     "share_trades_at_price_resting_in_prev_snapshot": 0.741
+    },
+    "all21": {
+     "level_changes_nonfill_per_s": 5.84,
+     "mix": {
+      "add": 0.337,
+      "remove": 0.337,
+      "size_up": 0.165,
+      "size_down": 0.161
+     },
+     "by_level_bucket_share": {
+      "1-5": 0.48,
+      "6-10": 0.286,
+      "11-20": 0.233
+     },
+     "trades_per_s": 0.00264,
+     "n_trades": 8381,
+     "nonfill_changes_per_trade": 2211.0,
+     "cancel_like_changes_per_trade": 1101.0,
+     "share_seconds_no_level_change": 0.504,
+     "nonfill_changes_in_one_second_pmf_buckets": {
+      "0": 0.504,
+      "1-2": 0.111,
+      "3-5": 0.0886,
+      "6-10": 0.104,
+      "11-20": 0.0984,
+      "21-40": 0.0775,
+      "41+": 0.0171
+     }
+    },
+    "class_total_per_s_core3": {
+     "nonfill_level_changes": 320.0,
+     "trades": 0.1558
+    },
+    "class_total_per_s_all21": {
+     "nonfill_level_changes": 245.3,
+     "trades": 0.1109
+    },
+    "per_market_nonfill_changes_per_s_across_markets_all21": {
+     "p10": 1.91,
+     "p50": 4.72,
+     "p90": 10.1,
+     "min": 0.456,
+     "max": 15.0,
+     "lognormal_mu": 1.556,
+     "lognormal_sigma": 0.701
+    },
+    "per_market_trades_per_s_across_markets_all21": {
+     "n_markets": 42,
+     "p10": 0.000358,
+     "p50": 0.00179,
+     "p90": 0.00495,
+     "min": 9.27e-05,
+     "max": 0.0175,
+     "lognormal_mu": -6.419,
+     "lognormal_sigma": 1.08
+    },
+    "per_market_nonfill_changes_per_trade_across_markets_all21": {
+     "n_markets": 42,
+     "p10": 850.0,
+     "p50": 2660.0,
+     "p90": 11200.0,
+     "min": 112.0,
+     "max": 38100.0,
+     "lognormal_mu": 7.975,
+     "lognormal_sigma": 1.21
+    }
+   }
+  }
+ },
+ "markets": {
+  "note": "shape columns from core3; *_all21 columns from all 21 full hours",
+  "columns": [
+   "class",
+   "category",
+   "pd",
+   "qd",
+   "mid_usd_p50",
+   "real_tick_engine_ticks",
+   "real_tick_bps",
+   "spread_rt_p10_p50_p90",
+   "spread_bps_p10_p50_p90",
+   "gap_rt_p50_p90",
+   "gap_rt_share_1",
+   "gap_bps_p50",
+   "levels_share_20",
+   "dist_bps_p50_k1_k5_k10_k20",
+   "depth_usd_p10_p50_p90",
+   "dust_share",
+   "repeat_share_same_side",
+   "nonfill_changes_per_s_all21",
+   "trades_per_s_all21",
+   "n_trades_all21",
+   "nonfill_changes_per_trade_all21",
+   "cancel_like_per_trade_all21"
+  ],
+  "rows": {
+   "SP500-USD": [
+    "tradfi",
+    "index",
+    1,
+    5,
+    7673.6,
+    1.0,
+    0.13,
+    [
+     1.0,
+     1.0,
+     8.0
+    ],
+    [
+     0.129,
+     0.131,
+     1.04
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.505,
+    0.132,
+    1.0,
+    [
+     0.0655,
+     1.5,
+     2.67,
+     6.22
+    ],
+    [
+     2490.0,
+     100000.0,
+     372000.0
+    ],
+    0.00928,
+    0.26,
+    7.72,
+    0.00323,
+    244,
+    2390.0,
+    1183.0
+   ],
+   "GOLD-USD": [
+    "tradfi",
+    "commodity",
+    1,
+    5,
+    4217.0,
+    1.0,
+    0.237,
+    [
+     1.0,
+     1.0,
+     5.0
+    ],
+    [
+     0.235,
+     0.238,
+     1.18
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.682,
+    0.238,
+    1.0,
+    [
+     0.119,
+     1.78,
+     3.16,
+     7.39
+    ],
+    [
+     9850.0,
+     51300.0,
+     284000.0
+    ],
+    0.00403,
+    0.286,
+    8.24,
+    0.00502,
+    379,
+    1642.0,
+    819.1
+   ],
+   "WTIOIL-USD": [
+    "tradfi",
+    "commodity",
+    3,
+    3,
+    89.781,
+    1.0,
+    0.111,
+    [
+     3.0,
+     10.0,
+     44.0
+    ],
+    [
+     0.334,
+     1.13,
+     4.89
+    ],
+    [
+     2.0,
+     11.0
+    ],
+    0.418,
+    0.225,
+    1.0,
+    [
+     0.56,
+     3.61,
+     5.0,
+     9.69
+    ],
+    [
+     997.0,
+     50200.0,
+     111000.0
+    ],
+    0.0429,
+    0.47,
+    14.1,
+    0.0158,
+    1195,
+    890.8,
+    449.0
+   ],
+   "NAS100-USD": [
+    "tradfi",
+    "index",
+    1,
+    5,
+    30549.0,
+    10.0,
+    0.327,
+    [
+     1.0,
+     1.0,
+     5.0
+    ],
+    [
+     0.325,
+     0.329,
+     1.64
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.692,
+    0.329,
+    1.0,
+    [
+     0.165,
+     2.15,
+     4.1,
+     9.67
+    ],
+    [
+     10900.0,
+     102000.0,
+     401000.0
+    ],
+    0.00676,
+    0.218,
+    7.3,
+    0.00756,
+    571,
+    965.6,
+    478.5
+   ],
+   "SILVER-USD": [
+    "tradfi",
+    "commodity",
+    3,
+    3,
+    60.954,
+    1.0,
+    0.164,
+    [
+     6.0,
+     13.0,
+     18.0
+    ],
+    [
+     0.971,
+     2.12,
+     2.96
+    ],
+    [
+     1.0,
+     6.0
+    ],
+    0.528,
+    0.166,
+    1.0,
+    [
+     1.06,
+     2.33,
+     3.9,
+     8.56
+    ],
+    [
+     1290.0,
+     51100.0,
+     186000.0
+    ],
+    0.0182,
+    0.323,
+    12.8,
+    0.00408,
+    308,
+    3130.0,
+    1564.0
+   ],
+   "BTC-USD": [
+    "majors",
+    "crypto",
+    1,
+    5,
+    84355.0,
+    10.0,
+    0.119,
+    [
+     1.0,
+     1.0,
+     10.0
+    ],
+    [
+     0.117,
+     0.119,
+     1.2
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.534,
+    0.12,
+    1.0,
+    [
+     0.0595,
+     1.6,
+     2.97,
+     5.01
+    ],
+    [
+     1350.0,
+     8230.0,
+     104000.0
+    ],
+    0.00215,
+    0.183,
+    14.0,
+    0.0793,
+    5994,
+    177.0,
+    89.29
+   ],
+   "ETH-USD": [
+    "majors",
+    "crypto",
+    2,
+    4,
+    2702.3,
+    10.0,
+    0.37,
+    [
+     1.0,
+     1.0,
+     3.0
+    ],
+    [
+     0.365,
+     0.372,
+     1.12
+    ],
+    [
+     1.0,
+     4.0
+    ],
+    0.584,
+    0.377,
+    1.0,
+    [
+     0.184,
+     3.1,
+     5.25,
+     14.1
+    ],
+    [
+     1340.0,
+     12700.0,
+     186000.0
+    ],
+    0.0139,
+    0.0957,
+    12.6,
+    0.0687,
+    5192,
+    182.6,
+    90.85
+   ],
+   "SOL-USD": [
+    "majors",
+    "crypto",
+    3,
+    3,
+    119.52,
+    10.0,
+    0.837,
+    [
+     1.0,
+     1.0,
+     3.0
+    ],
+    [
+     0.824,
+     0.841,
+     2.54
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.709,
+    0.843,
+    0.998,
+    [
+     0.422,
+     4.59,
+     9.59,
+     25.2
+    ],
+    [
+     883.0,
+     14200.0,
+     61100.0
+    ],
+    0.0628,
+    0.098,
+    12.2,
+    0.0659,
+    4979,
+    184.9,
+    91.85
+   ],
+   "SPCX-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    149.62,
+    1.0,
+    0.668,
+    [
+     2.0,
+     7.0,
+     9.0
+    ],
+    [
+     1.34,
+     4.63,
+     5.95
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.63,
+    0.673,
+    1.0,
+    [
+     2.3,
+     6.75,
+     10.4,
+     22.6
+    ],
+    [
+     243.0,
+     40100.0,
+     304000.0
+    ],
+    0.0557,
+    0.172,
+    2.33,
+    0.00098,
+    74,
+    2383.0,
+    1171.0
+   ],
+   "HYPE-USD": [
+    "alt_crypto",
+    "crypto",
+    3,
+    3,
+    86.256,
+    1.0,
+    0.116,
+    [
+     1.0,
+     9.0,
+     31.0
+    ],
+    [
+     0.116,
+     1.07,
+     3.55
+    ],
+    [
+     3.0,
+     13.0
+    ],
+    0.294,
+    0.354,
+    1.0,
+    [
+     0.532,
+     3.55,
+     5.39,
+     12.3
+    ],
+    [
+     909.0,
+     12800.0,
+     60300.0
+    ],
+    0.0185,
+    0.317,
+    14.3,
+    0.0185,
+    1395,
+    774.0,
+    384.8
+   ],
+   "MU-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    1063.0,
+    10.0,
+    0.941,
+    [
+     4.0,
+     6.0,
+     8.0
+    ],
+    [
+     3.75,
+     5.59,
+     7.43
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.6,
+    0.95,
+    0.999,
+    [
+     2.8,
+     6.95,
+     12.5,
+     41.1
+    ],
+    [
+     236.0,
+     40500.0,
+     335000.0
+    ],
+    0.0776,
+    0.157,
+    4.71,
+    0.00494,
+    373,
+    954.0,
+    464.6
+   ],
+   "SKHY-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    186.42,
+    1.0,
+    0.536,
+    [
+     5.0,
+     10.0,
+     13.0
+    ],
+    [
+     2.69,
+     5.38,
+     7.01
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.755,
+    0.541,
+    1.0,
+    [
+     2.67,
+     5.45,
+     8.43,
+     17.2
+    ],
+    [
+     496.0,
+     31800.0,
+     149000.0
+    ],
+    0.0298,
+    0.273,
+    8.65,
+    0.00361,
+    273,
+    2392.0,
+    1180.0
+   ],
+   "SKHYNIX-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    1322.9,
+    10.0,
+    0.756,
+    [
+     4.0,
+     6.0,
+     8.0
+    ],
+    [
+     3.05,
+     4.53,
+     6.08
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.584,
+    0.77,
+    1.0,
+    [
+     2.27,
+     5.7,
+     10.7,
+     32.8
+    ],
+    [
+     79.8,
+     40700.0,
+     188000.0
+    ],
+    0.0697,
+    0.163,
+    7.62,
+    0.00106,
+    80,
+    7195.0,
+    3544.0
+   ],
+   "AAPL-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    328.09,
+    1.0,
+    0.305,
+    [
+     7.0,
+     13.0,
+     17.0
+    ],
+    [
+     2.13,
+     3.94,
+     5.19
+    ],
+    [
+     1.0,
+     4.0
+    ],
+    0.584,
+    0.308,
+    1.0,
+    [
+     1.97,
+     4.21,
+     6.67,
+     12.9
+    ],
+    [
+     170.0,
+     74600.0,
+     208000.0
+    ],
+    0.0313,
+    0.373,
+    3.92,
+    0.00152,
+    115,
+    2578.0,
+    1283.0
+   ],
+   "MSFT-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    508.06,
+    1.0,
+    0.197,
+    [
+     6.0,
+     19.0,
+     26.0
+    ],
+    [
+     1.19,
+     3.78,
+     5.1
+    ],
+    [
+     2.0,
+     8.0
+    ],
+    0.473,
+    0.39,
+    1.0,
+    [
+     1.89,
+     4.55,
+     6.87,
+     13.2
+    ],
+    [
+     163.0,
+     100000.0,
+     202000.0
+    ],
+    0.0361,
+    0.515,
+    3.37,
+    0.00204,
+    154,
+    1655.0,
+    830.1
+   ],
+   "GOOG-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    343.35,
+    1.0,
+    0.291,
+    [
+     8.0,
+     15.0,
+     18.0
+    ],
+    [
+     2.34,
+     4.27,
+     5.31
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.549,
+    0.294,
+    1.0,
+    [
+     2.14,
+     4.42,
+     6.9,
+     14.0
+    ],
+    [
+     258.0,
+     93000.0,
+     303000.0
+    ],
+    0.031,
+    0.389,
+    4.12,
+    0.00364,
+    275,
+    1131.0,
+    563.1
+   ],
+   "AMZN-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    248.31,
+    1.0,
+    0.403,
+    [
+     7.0,
+     11.0,
+     15.0
+    ],
+    [
+     2.83,
+     4.46,
+     6.03
+    ],
+    [
+     1.0,
+     4.0
+    ],
+    0.597,
+    0.406,
+    1.0,
+    [
+     2.24,
+     5.33,
+     8.08,
+     17.0
+    ],
+    [
+     203.0,
+     76500.0,
+     211000.0
+    ],
+    0.0431,
+    0.362,
+    2.83,
+    0.00103,
+    78,
+    2744.0,
+    1365.0
+   ],
+   "NVDA-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    227.33,
+    1.0,
+    0.44,
+    [
+     7.0,
+     10.0,
+     13.0
+    ],
+    [
+     3.06,
+     4.4,
+     5.63
+    ],
+    [
+     1.0,
+     3.0
+    ],
+    0.675,
+    0.443,
+    1.0,
+    [
+     2.2,
+     4.65,
+     7.99,
+     15.3
+    ],
+    [
+     258.0,
+     60700.0,
+     243000.0
+    ],
+    0.019,
+    0.256,
+    4.6,
+    0.000622,
+    47,
+    7396.0,
+    3680.0
+   ],
+   "META-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    732.61,
+    1.0,
+    0.136,
+    [
+     3.0,
+     29.0,
+     44.0
+    ],
+    [
+     0.398,
+     3.93,
+     5.97
+    ],
+    [
+     3.0,
+     14.0
+    ],
+    0.342,
+    0.409,
+    1.0,
+    [
+     1.97,
+     5.58,
+     8.49,
+     15.6
+    ],
+    [
+     163.0,
+     74500.0,
+     204000.0
+    ],
+    0.0414,
+    0.389,
+    5.34,
+    0.00212,
+    160,
+    2522.0,
+    1273.0
+   ],
+   "TSLA-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    350.71,
+    1.0,
+    0.285,
+    [
+     10.0,
+     15.0,
+     19.0
+    ],
+    [
+     2.85,
+     4.24,
+     5.49
+    ],
+    [
+     1.0,
+     4.0
+    ],
+    0.584,
+    0.288,
+    1.0,
+    [
+     2.12,
+     4.57,
+     6.91,
+     12.5
+    ],
+    [
+     161.0,
+     100000.0,
+     204000.0
+    ],
+    0.0332,
+    0.38,
+    6.03,
+    0.00173,
+    131,
+    3479.0,
+    1733.0
+   ],
+   "AMD-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    609.53,
+    1.0,
+    0.164,
+    [
+     18.0,
+     26.0,
+     31.0
+    ],
+    [
+     2.98,
+     4.35,
+     5.08
+    ],
+    [
+     2.0,
+     9.0
+    ],
+    0.468,
+    0.325,
+    1.0,
+    [
+     2.18,
+     4.0,
+     5.71,
+     13.3
+    ],
+    [
+     258.0,
+     50200.0,
+     105000.0
+    ],
+    0.0345,
+    0.5,
+    10.1,
+    0.00118,
+    89,
+    8536.0,
+    4286.0
+   ],
+   "INTC-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    116.43,
+    1.0,
+    0.859,
+    [
+     4.0,
+     6.0,
+     8.0
+    ],
+    [
+     3.4,
+     5.14,
+     6.86
+    ],
+    [
+     1.0,
+     4.0
+    ],
+    0.508,
+    0.871,
+    0.999,
+    [
+     2.57,
+     7.64,
+     14.8,
+     35.8
+    ],
+    [
+     130.0,
+     15500.0,
+     202000.0
+    ],
+    0.0733,
+    0.244,
+    4.26,
+    0.000371,
+    28,
+    11490.0,
+    5655.0
+   ],
+   "AVGO-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    358.62,
+    1.0,
+    0.279,
+    [
+     6.0,
+     12.0,
+     17.0
+    ],
+    [
+     1.68,
+     3.35,
+     4.87
+    ],
+    [
+     2.0,
+     9.0
+    ],
+    0.413,
+    0.563,
+    1.0,
+    [
+     1.68,
+     5.26,
+     7.89,
+     19.8
+    ],
+    [
+     134.0,
+     50200.0,
+     102000.0
+    ],
+    0.0601,
+    0.44,
+    4.74,
+    0.00113,
+    85,
+    4211.0,
+    2101.0
+   ],
+   "QCOM-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    184.38,
+    1.0,
+    0.542,
+    [
+     2.0,
+     6.0,
+     8.0
+    ],
+    [
+     1.08,
+     3.23,
+     4.35
+    ],
+    [
+     2.0,
+     8.0
+    ],
+    0.457,
+    1.08,
+    0.999,
+    [
+     1.61,
+     4.36,
+     8.57,
+     35.4
+    ],
+    [
+     30.8,
+     13000.0,
+     151000.0
+    ],
+    0.0948,
+    0.3,
+    3.67,
+    0.00495,
+    374,
+    741.2,
+    366.2
+   ],
+   "ARM-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    293.62,
+    1.0,
+    0.341,
+    [
+     5.0,
+     11.0,
+     15.0
+    ],
+    [
+     1.71,
+     3.74,
+     5.02
+    ],
+    [
+     1.0,
+     6.0
+    ],
+    0.619,
+    0.344,
+    1.0,
+    [
+     1.86,
+     4.28,
+     6.78,
+     16.5
+    ],
+    [
+     261.0,
+     15400.0,
+     140000.0
+    ],
+    0.0447,
+    0.407,
+    12.2,
+    0.00811,
+    613,
+    1502.0,
+    743.4
+   ],
+   "TSM-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    453.09,
+    1.0,
+    0.221,
+    [
+     4.0,
+     14.0,
+     21.0
+    ],
+    [
+     0.883,
+     3.03,
+     4.67
+    ],
+    [
+     2.0,
+     7.0
+    ],
+    0.496,
+    0.437,
+    1.0,
+    [
+     1.52,
+     4.02,
+     6.57,
+     12.8
+    ],
+    [
+     259.0,
+     31400.0,
+     141000.0
+    ],
+    0.0546,
+    0.454,
+    3.52,
+    0.00304,
+    230,
+    1156.0,
+    573.7
+   ],
+   "ASML-USD": [
+    "tradfi",
+    "equity",
+    1,
+    5,
+    1840.8,
+    1.0,
+    0.543,
+    [
+     4.0,
+     8.0,
+     10.0
+    ],
+    [
+     2.14,
+     4.41,
+     5.44
+    ],
+    [
+     3.0,
+     11.0
+    ],
+    0.319,
+    1.63,
+    0.997,
+    [
+     2.19,
+     6.24,
+     14.4,
+     49.1
+    ],
+    [
+     11.4,
+     8060.0,
+     236000.0
+    ],
+    0.112,
+    0.283,
+    3.15,
+    0.00217,
+    164,
+    1451.0,
+    726.5
+   ],
+   "SNDK-USD": [
+    "tradfi",
+    "equity",
+    1,
+    5,
+    1718.4,
+    1.0,
+    0.582,
+    [
+     6.0,
+     8.0,
+     10.0
+    ],
+    [
+     3.42,
+     4.62,
+     5.88
+    ],
+    [
+     1.0,
+     6.0
+    ],
+    0.539,
+    0.588,
+    0.997,
+    [
+     2.32,
+     5.84,
+     10.1,
+     27.9
+    ],
+    [
+     121.0,
+     25400.0,
+     200000.0
+    ],
+    0.0865,
+    0.305,
+    7.25,
+    0.00192,
+    145,
+    3778.0,
+    1862.0
+   ],
+   "DRAM-USD": [
+    "tradfi",
+    "index",
+    3,
+    3,
+    60.954,
+    1.0,
+    0.164,
+    [
+     22.0,
+     24.0,
+     27.0
+    ],
+    [
+     3.58,
+     3.97,
+     4.4
+    ],
+    [
+     2.0,
+     10.0
+    ],
+    0.376,
+    0.328,
+    1.0,
+    [
+     1.99,
+     4.37,
+     6.63,
+     13.3
+    ],
+    [
+     259.0,
+     50900.0,
+     128000.0
+    ],
+    0.0244,
+    0.553,
+    10.1,
+    0.000265,
+    20,
+    38120.0,
+    19150.0
+   ],
+   "PUMP-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    0.0058033,
+    1.0,
+    1.72,
+    [
+     1.0,
+     3.0,
+     5.0
+    ],
+    [
+     1.76,
+     5.18,
+     8.36
+    ],
+    [
+     1.0,
+     18.0
+    ],
+    0.504,
+    1.78,
+    0.92,
+    [
+     2.59,
+     10.0,
+     21.3,
+     167.0
+    ],
+    [
+     97.9,
+     6290.0,
+     63600.0
+    ],
+    0.0868,
+    0.0898,
+    12.1,
+    0.0312,
+    2360,
+    386.1,
+    192.0
+   ],
+   "ZEC-USD": [
+    "alt_crypto",
+    "crypto",
+    2,
+    4,
+    1418.6,
+    10.0,
+    0.705,
+    [
+     2.0,
+     6.0,
+     10.0
+    ],
+    [
+     1.41,
+     4.19,
+     6.66
+    ],
+    [
+     2.0,
+     20.0
+    ],
+    0.401,
+    1.42,
+    1.0,
+    [
+     2.09,
+     8.5,
+     14.8,
+     74.8
+    ],
+    [
+     36.2,
+     6680.0,
+     115000.0
+    ],
+    0.09,
+    0.193,
+    12.3,
+    0.0158,
+    1193,
+    779.5,
+    391.3
+   ],
+   "XRP-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    1.5047,
+    100.0,
+    0.665,
+    [
+     2.0,
+     4.0,
+     7.0
+    ],
+    [
+     1.35,
+     2.68,
+     4.59
+    ],
+    [
+     1.0,
+     5.0
+    ],
+    0.524,
+    0.675,
+    0.992,
+    [
+     1.34,
+     6.09,
+     11.0,
+     30.2
+    ],
+    [
+     247.0,
+     12800.0,
+     73500.0
+    ],
+    0.0855,
+    0.173,
+    9.57,
+    0.00352,
+    266,
+    2718.0,
+    1355.0
+   ],
+   "LIT-USD": [
+    "alt_crypto",
+    "crypto",
+    4,
+    2,
+    4.0123,
+    1.0,
+    0.249,
+    [
+     16.0,
+     26.0,
+     35.0
+    ],
+    [
+     4.07,
+     6.29,
+     8.31
+    ],
+    [
+     5.0,
+     23.0
+    ],
+    0.17,
+    1.28,
+    0.99,
+    [
+     3.15,
+     9.31,
+     16.0,
+     38.1
+    ],
+    [
+     133.0,
+     4910.0,
+     33400.0
+    ],
+    0.0806,
+    0.318,
+    19.4,
+    0.0371,
+    2806,
+    521.1,
+    260.8
+   ],
+   "KPEPE-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    0.0043202,
+    1.0,
+    2.31,
+    [
+     2.0,
+     3.0,
+     4.0
+    ],
+    [
+     4.66,
+     7.24,
+     9.49
+    ],
+    [
+     2.0,
+     34.0
+    ],
+    0.424,
+    4.63,
+    0.00343,
+    [
+     3.62,
+     14.9,
+     36.4,
+     3980.0
+    ],
+    [
+     20.5,
+     6610.0,
+     130000.0
+    ],
+    0.0972,
+    0.0869,
+    4.99,
+    0.000371,
+    28,
+    13470.0,
+    6710.0
+   ],
+   "HOOD-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    117.65,
+    10.0,
+    0.85,
+    [
+     3.0,
+     5.0,
+     7.0
+    ],
+    [
+     2.46,
+     4.24,
+     5.88
+    ],
+    [
+     4.0,
+     184.0
+    ],
+    0.346,
+    3.27,
+    0.728,
+    [
+     2.12,
+     6.45,
+     17.4,
+     414.0
+    ],
+    [
+     30.5,
+     7980.0,
+     155000.0
+    ],
+    0.0277,
+    0.185,
+    5.14,
+    0.00304,
+    230,
+    1687.0,
+    837.9
+   ],
+   "MSTR-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    157.08,
+    10.0,
+    0.637,
+    [
+     6.0,
+     9.0,
+     12.0
+    ],
+    [
+     3.8,
+     5.5,
+     7.62
+    ],
+    [
+     1.0,
+     8.0
+    ],
+    0.539,
+    0.645,
+    0.978,
+    [
+     2.76,
+     7.07,
+     11.1,
+     35.2
+    ],
+    [
+     100.0,
+     25400.0,
+     194000.0
+    ],
+    0.0893,
+    0.383,
+    8.45,
+    0.00242,
+    183,
+    3486.0,
+    1725.0
+   ],
+   "STRC-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    98.855,
+    1.0,
+    0.101,
+    [
+     20.0,
+     47.0,
+     65.0
+    ],
+    [
+     2.04,
+     4.76,
+     6.53
+    ],
+    [
+     8.0,
+     70.0
+    ],
+    0.271,
+    0.805,
+    0.127,
+    [
+     2.38,
+     6.1,
+     14.4,
+     15.8
+    ],
+    [
+     11.1,
+     2010.0,
+     101000.0
+    ],
+    0.225,
+    0.624,
+    1.84,
+    0.00177,
+    134,
+    1040.0,
+    519.9
+   ],
+   "CRCL-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    84.358,
+    1.0,
+    0.119,
+    [
+     20.0,
+     35.0,
+     43.0
+    ],
+    [
+     2.39,
+     4.11,
+     5.02
+    ],
+    [
+     2.0,
+     7.0
+    ],
+    0.468,
+    0.235,
+    1.0,
+    [
+     2.06,
+     3.19,
+     4.66,
+     8.44
+    ],
+    [
+     990.0,
+     49000.0,
+     80100.0
+    ],
+    0.014,
+    0.651,
+    13.0,
+    0.00167,
+    126,
+    7806.0,
+    3885.0
+   ],
+   "COIN-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    190.88,
+    1.0,
+    0.524,
+    [
+     4.0,
+     7.0,
+     9.0
+    ],
+    [
+     2.06,
+     3.69,
+     4.82
+    ],
+    [
+     2.0,
+     18.0
+    ],
+    0.439,
+    1.05,
+    0.771,
+    [
+     1.85,
+     4.72,
+     8.14,
+     46.0
+    ],
+    [
+     30.3,
+     10100.0,
+     154000.0
+    ],
+    0.0835,
+    0.297,
+    5.65,
+    0.00295,
+    223,
+    1913.0,
+    942.0
+   ],
+   "RKLB-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    70.359,
+    1.0,
+    0.142,
+    [
+     17.0,
+     32.0,
+     39.0
+    ],
+    [
+     2.44,
+     4.58,
+     5.46
+    ],
+    [
+     3.0,
+     30.0
+    ],
+    0.291,
+    0.43,
+    0.981,
+    [
+     2.28,
+     4.66,
+     6.93,
+     25.4
+    ],
+    [
+     30.7,
+     25300.0,
+     75000.0
+    ],
+    0.0918,
+    0.532,
+    9.21,
+    0.0025,
+    189,
+    3683.0,
+    1852.0
+   ],
+   "LITE-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    971.74,
+    1.0,
+    0.103,
+    [
+     13.0,
+     31.0,
+     47.0
+    ],
+    [
+     1.43,
+     3.19,
+     4.86
+    ],
+    [
+     2.0,
+     18.0
+    ],
+    0.433,
+    0.206,
+    0.991,
+    [
+     1.6,
+     3.67,
+     5.13,
+     9.62
+    ],
+    [
+     762.0,
+     25200.0,
+     50800.0
+    ],
+    0.042,
+    0.627,
+    14.3,
+    0.00201,
+    152,
+    7117.0,
+    3576.0
+   ],
+   "NBIS-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    241.37,
+    1.0,
+    0.414,
+    [
+     6.0,
+     9.0,
+     13.0
+    ],
+    [
+     2.48,
+     3.71,
+     5.36
+    ],
+    [
+     3.0,
+     22.0
+    ],
+    0.381,
+    1.22,
+    0.828,
+    [
+     1.86,
+     4.71,
+     8.87,
+     46.1
+    ],
+    [
+     10.9,
+     25400.0,
+     101000.0
+    ],
+    0.124,
+    0.287,
+    10.0,
+    0.00555,
+    419,
+    1809.0,
+    909.2
+   ],
+   "ORCL-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    136.81,
+    1.0,
+    0.731,
+    [
+     3.0,
+     6.0,
+     7.0
+    ],
+    [
+     2.18,
+     4.37,
+     5.13
+    ],
+    [
+     2.0,
+     37.0
+    ],
+    0.454,
+    1.46,
+    0.815,
+    [
+     2.17,
+     5.47,
+     10.9,
+     102.0
+    ],
+    [
+     20.6,
+     25400.0,
+     100000.0
+    ],
+    0.093,
+    0.251,
+    4.23,
+    0.0013,
+    98,
+    3261.0,
+    1603.0
+   ],
+   "PLTR-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    187.72,
+    1.0,
+    0.533,
+    [
+     4.0,
+     7.0,
+     10.0
+    ],
+    [
+     2.14,
+     3.75,
+     5.3
+    ],
+    [
+     2.0,
+     39.0
+    ],
+    0.416,
+    1.08,
+    0.658,
+    [
+     1.88,
+     5.68,
+     9.22,
+     77.3
+    ],
+    [
+     51.1,
+     25300.0,
+     101000.0
+    ],
+    0.0599,
+    0.182,
+    3.58,
+    0.00086,
+    65,
+    4162.0,
+    2055.0
+   ],
+   "BRENTOIL-USD": [
+    "tradfi",
+    "commodity",
+    3,
+    3,
+    97.065,
+    1.0,
+    0.103,
+    [
+     30.0,
+     44.0,
+     56.0
+    ],
+    [
+     3.14,
+     4.46,
+     5.75
+    ],
+    [
+     3.0,
+     16.0
+    ],
+    0.349,
+    0.305,
+    1.0,
+    [
+     2.23,
+     3.95,
+     6.38,
+     12.3
+    ],
+    [
+     402.0,
+     25600.0,
+     76100.0
+    ],
+    0.0455,
+    0.5,
+    11.5,
+    0.00322,
+    243,
+    3583.0,
+    1803.0
+   ],
+   "BABA-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    108.39,
+    1.0,
+    0.923,
+    [
+     3.0,
+     6.0,
+     7.0
+    ],
+    [
+     2.8,
+     5.5,
+     6.57
+    ],
+    [
+     10.0,
+     311.0
+    ],
+    0.3,
+    9.25,
+    0.0161,
+    [
+     2.71,
+     7.07,
+     133.0,
+     4230.0
+    ],
+    [
+     10.9,
+     2670.0,
+     150000.0
+    ],
+    0.203,
+    0.278,
+    1.23,
+    0.00437,
+    330,
+    281.7,
+    137.1
+   ],
+   "ZM-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    88.268,
+    1.0,
+    1.13,
+    [
+     3.0,
+     5.0,
+     7.0
+    ],
+    [
+     3.32,
+     5.65,
+     7.89
+    ],
+    [
+     1.0,
+     3304.0
+    ],
+    0.597,
+    1.14,
+    0,
+    [
+     2.83,
+     8.36,
+     18.2,
+     null
+    ],
+    [
+     11.1,
+     5000.0,
+     128000.0
+    ],
+    0.172,
+    0.364,
+    1.54,
+    0.00181,
+    137,
+    849.3,
+    422.3
+   ],
+   "DELL-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    543.35,
+    1.0,
+    0.184,
+    [
+     13.0,
+     26.0,
+     31.0
+    ],
+    [
+     2.41,
+     4.86,
+     5.72
+    ],
+    [
+     49.0,
+     1017.0
+    ],
+    0.117,
+    8.96,
+    9.26e-05,
+    [
+     2.43,
+     7.18,
+     92.0,
+     3850.0
+    ],
+    [
+     10.6,
+     2780.0,
+     15800.0
+    ],
+    0.227,
+    0.37,
+    2.98,
+    9.27e-05,
+    7,
+    32210.0,
+    16450.0
+   ],
+   "CXMT-USD": [
+    "tradfi",
+    "equity",
+    4,
+    2,
+    8.414,
+    1.0,
+    0.119,
+    [
+     1.0,
+     26.0,
+     49.0
+    ],
+    [
+     0.12,
+     3.11,
+     5.84
+    ],
+    [
+     30.0,
+     650.0
+    ],
+    0.176,
+    3.57,
+    0,
+    [
+     1.54,
+     4.92,
+     28.6,
+     null
+    ],
+    [
+     11.0,
+     300.0,
+     5100.0
+    ],
+    0.226,
+    0.665,
+    2.89,
+    0.00173,
+    131,
+    1665.0,
+    837.0
+   ],
+   "SAMSUNG-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    198.38,
+    1.0,
+    0.504,
+    [
+     3.0,
+     9.0,
+     12.0
+    ],
+    [
+     1.52,
+     4.48,
+     6.16
+    ],
+    [
+     8.0,
+     299.0
+    ],
+    0.196,
+    4.07,
+    0.132,
+    [
+     2.24,
+     5.88,
+     20.2,
+     4060.0
+    ],
+    [
+     72.1,
+     15800.0,
+     91100.0
+    ],
+    0.0769,
+    0.0869,
+    7.26,
+    0.00131,
+    99,
+    5537.0,
+    2755.0
+   ],
+   "CRWV-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    86.468,
+    1.0,
+    0.116,
+    [
+     1.0,
+     30.0,
+     50.0
+    ],
+    [
+     0.117,
+     3.43,
+     5.72
+    ],
+    [
+     21.0,
+     1322.0
+    ],
+    0.284,
+    2.36,
+    0.31,
+    [
+     1.72,
+     4.47,
+     16.5,
+     689.0
+    ],
+    [
+     10.9,
+     5070.0,
+     24800.0
+    ],
+    0.176,
+    0.397,
+    8.17,
+    0.00175,
+    132,
+    4678.0,
+    2337.0
+   ],
+   "AAVE-USD": [
+    "alt_crypto",
+    "crypto",
+    2,
+    4,
+    163.21,
+    1.0,
+    0.613,
+    [
+     6.0,
+     8.0,
+     11.0
+    ],
+    [
+     3.65,
+     4.92,
+     6.68
+    ],
+    [
+     3.0,
+     69.0
+    ],
+    0.333,
+    1.86,
+    0.795,
+    [
+     2.47,
+     6.53,
+     15.0,
+     589.0
+    ],
+    [
+     11.3,
+     9600.0,
+     178000.0
+    ],
+    0.131,
+    0.324,
+    12.1,
+    0.00369,
+    279,
+    3288.0,
+    1638.0
+   ],
+   "UNI-USD": [
+    "alt_crypto",
+    "crypto",
+    4,
+    2,
+    8.978,
+    1.0,
+    0.111,
+    [
+     33.0,
+     48.0,
+     62.0
+    ],
+    [
+     3.64,
+     5.35,
+     6.91
+    ],
+    [
+     7.0,
+     39.0
+    ],
+    0.23,
+    0.783,
+    0.91,
+    [
+     2.68,
+     3.96,
+     8.04,
+     25.6
+    ],
+    [
+     11.3,
+     6410.0,
+     81100.0
+    ],
+    0.114,
+    0.53,
+    21.0,
+    0.00634,
+    479,
+    3313.0,
+    1655.0
+   ],
+   "WLD-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.51683,
+    1.0,
+    0.193,
+    [
+     17.0,
+     28.0,
+     38.0
+    ],
+    [
+     3.26,
+     5.38,
+     6.99
+    ],
+    [
+     6.0,
+     75.0
+    ],
+    0.215,
+    1.17,
+    0.916,
+    [
+     2.7,
+     4.83,
+     11.0,
+     65.9
+    ],
+    [
+     11.2,
+     7080.0,
+     45700.0
+    ],
+    0.138,
+    0.392,
+    23.9,
+    0.0186,
+    1402,
+    1288.0,
+    646.9
+   ],
+   "NEAR-USD": [
+    "alt_crypto",
+    "crypto",
+    4,
+    2,
+    5.1633,
+    1.0,
+    0.194,
+    [
+     14.0,
+     24.0,
+     34.0
+    ],
+    [
+     2.73,
+     4.62,
+     6.53
+    ],
+    [
+     6.0,
+     197.0
+    ],
+    0.234,
+    1.23,
+    0.908,
+    [
+     2.31,
+     4.7,
+     11.0,
+     135.0
+    ],
+    [
+     11.2,
+     6390.0,
+     63200.0
+    ],
+    0.141,
+    0.449,
+    22.4,
+    0.0319,
+    2411,
+    702.0,
+    353.7
+   ],
+   "KSHIB-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    0.0058443,
+    1.0,
+    1.71,
+    [
+     3.0,
+     5.0,
+     6.0
+    ],
+    [
+     5.22,
+     8.51,
+     10.4
+    ],
+    [
+     4.0,
+     36.0
+    ],
+    0.247,
+    6.95,
+    0,
+    [
+     4.26,
+     15.3,
+     83.1,
+     null
+    ],
+    [
+     11.2,
+     10100.0,
+     60100.0
+    ],
+    0.171,
+    0.164,
+    2.98,
+    0.00041,
+    31,
+    7274.0,
+    3663.0
+   ],
+   "FARTCOIN-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.18084,
+    1.0,
+    0.553,
+    [
+     4.0,
+     9.0,
+     13.0
+    ],
+    [
+     2.22,
+     4.95,
+     7.1
+    ],
+    [
+     3.0,
+     55.0
+    ],
+    0.332,
+    1.65,
+    0.887,
+    [
+     2.48,
+     6.07,
+     13.7,
+     115.0
+    ],
+    [
+     11.4,
+     6370.0,
+     37200.0
+    ],
+    0.106,
+    0.409,
+    13.7,
+    0.0106,
+    802,
+    1289.0,
+    646.7
+   ],
+   "DOGE-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    0.094951,
+    1.0,
+    0.105,
+    [
+     32.0,
+     49.0,
+     63.0
+    ],
+    [
+     3.4,
+     5.2,
+     6.56
+    ],
+    [
+     9.0,
+     56.0
+    ],
+    0.213,
+    0.942,
+    0.98,
+    [
+     2.6,
+     4.16,
+     8.16,
+     41.0
+    ],
+    [
+     11.2,
+     6620.0,
+     90700.0
+    ],
+    0.129,
+    0.437,
+    14.0,
+    0.00387,
+    292,
+    3612.0,
+    1812.0
+   ],
+   "ENA-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.25823,
+    1.0,
+    0.387,
+    [
+     5.0,
+     12.0,
+     17.0
+    ],
+    [
+     1.94,
+     4.81,
+     6.43
+    ],
+    [
+     3.0,
+     26.0
+    ],
+    0.357,
+    1.19,
+    0.954,
+    [
+     2.4,
+     4.98,
+     12.7,
+     62.7
+    ],
+    [
+     11.3,
+     6330.0,
+     55200.0
+    ],
+    0.13,
+    0.386,
+    19.6,
+    0.0102,
+    774,
+    1911.0,
+    953.8
+   ],
+   "ONDO-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.5091,
+    1.0,
+    0.196,
+    [
+     13.0,
+     22.0,
+     30.0
+    ],
+    [
+     2.49,
+     4.34,
+     6.01
+    ],
+    [
+     5.0,
+     49.0
+    ],
+    0.189,
+    1.0,
+    0.946,
+    [
+     2.18,
+     4.63,
+     9.29,
+     50.1
+    ],
+    [
+     11.2,
+     9850.0,
+     115000.0
+    ],
+    0.136,
+    0.48,
+    17.4,
+    0.00874,
+    660,
+    1994.0,
+    996.4
+   ],
+   "SUI-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    1.1666,
+    10.0,
+    0.857,
+    [
+     3.0,
+     6.0,
+     8.0
+    ],
+    [
+     2.59,
+     5.15,
+     6.79
+    ],
+    [
+     2.0,
+     533.0
+    ],
+    0.4,
+    1.73,
+    0.628,
+    [
+     2.58,
+     6.54,
+     14.9,
+     2150.0
+    ],
+    [
+     11.1,
+     6440.0,
+     73400.0
+    ],
+    0.134,
+    0.262,
+    12.1,
+    0.00634,
+    479,
+    1907.0,
+    960.1
+   ],
+   "VVV-USD": [
+    "longtail_crypto",
+    "crypto",
+    3,
+    3,
+    27.351,
+    1.0,
+    0.366,
+    [
+     1.0,
+     13.0,
+     22.0
+    ],
+    [
+     0.365,
+     4.84,
+     8.16
+    ],
+    [
+     8.0,
+     273.0
+    ],
+    0.153,
+    2.84,
+    0.294,
+    [
+     2.42,
+     7.36,
+     16.2,
+     3620.0
+    ],
+    [
+     11.1,
+     752.0,
+     29900.0
+    ],
+    0.169,
+    0.33,
+    8.29,
+    0.0148,
+    1118,
+    560.3,
+    278.3
+   ],
+   "TAO-USD": [
+    "longtail_crypto",
+    "crypto",
+    2,
+    4,
+    306.46,
+    1.0,
+    0.326,
+    [
+     9.0,
+     15.0,
+     20.0
+    ],
+    [
+     2.93,
+     4.99,
+     6.52
+    ],
+    [
+     4.0,
+     29.0
+    ],
+    0.251,
+    1.31,
+    1.0,
+    [
+     2.5,
+     4.88,
+     11.0,
+     54.0
+    ],
+    [
+     11.3,
+     6400.0,
+     79800.0
+    ],
+    0.128,
+    0.355,
+    15.0,
+    0.00638,
+    482,
+    2349.0,
+    1180.0
+   ],
+   "ADA-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.24785,
+    1.0,
+    0.403,
+    [
+     6.0,
+     11.0,
+     16.0
+    ],
+    [
+     2.45,
+     4.56,
+     6.41
+    ],
+    [
+     3.0,
+     66.0
+    ],
+    0.286,
+    1.25,
+    0.813,
+    [
+     2.29,
+     4.86,
+     11.3,
+     109.0
+    ],
+    [
+     11.0,
+     7270.0,
+     72500.0
+    ],
+    0.141,
+    0.382,
+    12.5,
+    0.00379,
+    286,
+    3306.0,
+    1659.0
+   ],
+   "ZRO-USD": [
+    "longtail_crypto",
+    "crypto",
+    4,
+    2,
+    1.7576,
+    1.0,
+    0.569,
+    [
+     5.0,
+     9.0,
+     13.0
+    ],
+    [
+     2.87,
+     5.64,
+     7.3
+    ],
+    [
+     3.0,
+     25.0
+    ],
+    0.31,
+    1.65,
+    0.925,
+    [
+     2.82,
+     7.78,
+     15.4,
+     101.0
+    ],
+    [
+     11.4,
+     6320.0,
+     29600.0
+    ],
+    0.105,
+    0.336,
+    18.0,
+    0.0257,
+    1943,
+    699.8,
+    348.2
+   ],
+   "BNB-USD": [
+    "alt_crypto",
+    "crypto",
+    2,
+    4,
+    763.65,
+    1.0,
+    0.131,
+    [
+     29.0,
+     40.0,
+     48.0
+    ],
+    [
+     3.83,
+     5.22,
+     6.34
+    ],
+    [
+     6.0,
+     38.0
+    ],
+    0.239,
+    0.779,
+    0.985,
+    [
+     2.62,
+     3.97,
+     7.4,
+     39.0
+    ],
+    [
+     346.0,
+     18900.0,
+     169000.0
+    ],
+    0.00795,
+    0.377,
+    8.17,
+    0.00098,
+    74,
+    8340.0,
+    4253.0
+   ],
+   "PONS-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.55808,
+    1.0,
+    0.179,
+    [
+     4.0,
+     24.0,
+     36.0
+    ],
+    [
+     0.721,
+     4.34,
+     6.6
+    ],
+    [
+     15.0,
+     101.0
+    ],
+    0.134,
+    2.81,
+    0.999,
+    [
+     2.17,
+     5.23,
+     18.3,
+     131.0
+    ],
+    [
+     11.2,
+     1580.0,
+     23700.0
+    ],
+    0.11,
+    0.367,
+    15.4,
+    0.0241,
+    1818,
+    641.0,
+    321.2
+   ],
+   "CASHCAT-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.17747,
+    1.0,
+    0.563,
+    [
+     12.0,
+     29.0,
+     47.0
+    ],
+    [
+     6.88,
+     16.6,
+     26.2
+    ],
+    [
+     18.0,
+     151.0
+    ],
+    0.0882,
+    10.3,
+    0.405,
+    [
+     8.29,
+     17.7,
+     53.4,
+     563.0
+    ],
+    [
+     11.0,
+     979.0,
+     5970.0
+    ],
+    0.146,
+    0.146,
+    4.21,
+    0.0282,
+    2131,
+    149.1,
+    74.57
+   ],
+   "USELESS-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.24298,
+    1.0,
+    0.412,
+    [
+     7.0,
+     13.0,
+     18.0
+    ],
+    [
+     2.79,
+     5.41,
+     7.48
+    ],
+    [
+     24.0,
+     804.0
+    ],
+    0.0823,
+    9.9,
+    0.167,
+    [
+     2.71,
+     17.0,
+     69.6,
+     1300.0
+    ],
+    [
+     10.9,
+     499.0,
+     6350.0
+    ],
+    0.195,
+    0.235,
+    9.02,
+    0.00578,
+    437,
+    1560.0,
+    783.0
+   ],
+   "KAITO-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.3433,
+    1.0,
+    0.291,
+    [
+     11.0,
+     15.0,
+     19.0
+    ],
+    [
+     3.27,
+     4.42,
+     5.57
+    ],
+    [
+     4.0,
+     41.0
+    ],
+    0.32,
+    1.13,
+    0.0295,
+    [
+     2.21,
+     4.9,
+     14.1,
+     4210.0
+    ],
+    [
+     11.2,
+     1370.0,
+     61500.0
+    ],
+    0.197,
+    0.617,
+    13.2,
+    0.00224,
+    169,
+    5888.0,
+    2941.0
+   ],
+   "ARB-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.20583,
+    1.0,
+    0.486,
+    [
+     1.0,
+     8.0,
+     11.0
+    ],
+    [
+     0.484,
+     3.93,
+     5.36
+    ],
+    [
+     2.0,
+     9.0
+    ],
+    0.36,
+    0.99,
+    0.993,
+    [
+     1.97,
+     5.02,
+     11.9,
+     34.2
+    ],
+    [
+     129.0,
+     6370.0,
+     44400.0
+    ],
+    0.0946,
+    0.239,
+    17.1,
+    0.0202,
+    1524,
+    849.2,
+    423.5
+   ],
+   "LDO-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.47654,
+    1.0,
+    0.21,
+    [
+     16.0,
+     25.0,
+     35.0
+    ],
+    [
+     3.31,
+     5.34,
+     7.31
+    ],
+    [
+     5.0,
+     38.0
+    ],
+    0.266,
+    1.02,
+    0.976,
+    [
+     2.67,
+     5.39,
+     11.4,
+     46.5
+    ],
+    [
+     11.2,
+     6350.0,
+     49900.0
+    ],
+    0.121,
+    0.502,
+    16.5,
+    0.00388,
+    293,
+    4246.0,
+    2142.0
+   ],
+   "AVAX-USD": [
+    "alt_crypto",
+    "crypto",
+    4,
+    2,
+    11.234,
+    10.0,
+    0.89,
+    [
+     5.0,
+     6.0,
+     8.0
+    ],
+    [
+     4.41,
+     5.4,
+     7.11
+    ],
+    [
+     2.0,
+     14.0
+    ],
+    0.414,
+    1.78,
+    0.975,
+    [
+     2.68,
+     7.44,
+     15.7,
+     85.9
+    ],
+    [
+     11.4,
+     6410.0,
+     45500.0
+    ],
+    0.116,
+    0.229,
+    9.57,
+    0.00102,
+    77,
+    9394.0,
+    4687.0
+   ],
+   "LTC-USD": [
+    "alt_crypto",
+    "crypto",
+    3,
+    3,
+    67.061,
+    1.0,
+    0.149,
+    [
+     24.0,
+     39.0,
+     50.0
+    ],
+    [
+     3.5,
+     5.82,
+     7.42
+    ],
+    [
+     15.0,
+     393.0
+    ],
+    0.14,
+    2.19,
+    0.793,
+    [
+     2.92,
+     7.01,
+     15.1,
+     308.0
+    ],
+    [
+     11.1,
+     6330.0,
+     49100.0
+    ],
+    0.143,
+    0.41,
+    6.78,
+    0.00177,
+    134,
+    3825.0,
+    1912.0
+   ],
+   "XPL-USD": [
+    "alt_crypto",
+    "crypto",
+    6,
+    0,
+    0.096925,
+    1.0,
+    0.103,
+    [
+     10.0,
+     41.0,
+     65.0
+    ],
+    [
+     1.03,
+     4.25,
+     6.72
+    ],
+    [
+     14.0,
+     149.0
+    ],
+    0.142,
+    1.45,
+    0.974,
+    [
+     2.13,
+     5.09,
+     13.5,
+     87.1
+    ],
+    [
+     11.3,
+     4990.0,
+     24800.0
+    ],
+    0.143,
+    0.482,
+    15.8,
+    0.00586,
+    443,
+    2687.0,
+    1345.0
+   ],
+   "XMR-USD": [
+    "longtail_crypto",
+    "crypto",
+    2,
+    4,
+    543.25,
+    1.0,
+    0.184,
+    [
+     21.0,
+     28.0,
+     34.0
+    ],
+    [
+     3.8,
+     5.15,
+     6.29
+    ],
+    [
+     4.0,
+     20.0
+    ],
+    0.198,
+    0.739,
+    0.999,
+    [
+     2.57,
+     4.99,
+     9.56,
+     31.8
+    ],
+    [
+     191.0,
+     6310.0,
+     74200.0
+    ],
+    0.0973,
+    0.393,
+    7.12,
+    0.00184,
+    139,
+    3869.0,
+    1947.0
+   ],
+   "LINK-USD": [
+    "alt_crypto",
+    "crypto",
+    3,
+    3,
+    14.526,
+    1.0,
+    0.688,
+    [
+     4.0,
+     7.0,
+     9.0
+    ],
+    [
+     2.82,
+     4.79,
+     6.29
+    ],
+    [
+     3.0,
+     60.0
+    ],
+    0.357,
+    2.04,
+    0.224,
+    [
+     2.4,
+     6.14,
+     14.6,
+     3940.0
+    ],
+    [
+     10.9,
+     6450.0,
+     81600.0
+    ],
+    0.133,
+    0.292,
+    8.01,
+    0.00899,
+    679,
+    891.1,
+    446.4
+   ],
+   "VIRTUAL-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.80446,
+    1.0,
+    0.124,
+    [
+     35.0,
+     48.0,
+     57.0
+    ],
+    [
+     4.36,
+     5.97,
+     7.1
+    ],
+    [
+     12.0,
+     123.0
+    ],
+    0.157,
+    1.5,
+    0.965,
+    [
+     2.99,
+     4.97,
+     13.2,
+     128.0
+    ],
+    [
+     11.3,
+     6440.0,
+     49000.0
+    ],
+    0.14,
+    0.387,
+    14.8,
+    0.00347,
+    262,
+    4281.0,
+    2149.0
+   ],
+   "JUP-USD": [
+    "alt_crypto",
+    "crypto",
+    5,
+    1,
+    0.33518,
+    1.0,
+    0.298,
+    [
+     14.0,
+     21.0,
+     29.0
+    ],
+    [
+     4.09,
+     6.44,
+     8.64
+    ],
+    [
+     10.0,
+     332.0
+    ],
+    0.127,
+    3.02,
+    0.734,
+    [
+     3.21,
+     10.6,
+     19.6,
+     458.0
+    ],
+    [
+     98.8,
+     4430.0,
+     14900.0
+    ],
+    0.0135,
+    0.228,
+    6.8,
+    0.00653,
+    493,
+    1043.0,
+    522.0
+   ],
+   "ETHFI-USD": [
+    "longtail_crypto",
+    "crypto",
+    5,
+    1,
+    0.77944,
+    1.0,
+    0.128,
+    [
+     8.0,
+     47.0,
+     69.0
+    ],
+    [
+     1.03,
+     6.08,
+     8.86
+    ],
+    [
+     23.0,
+     784.0
+    ],
+    0.0599,
+    3.02,
+    0.621,
+    [
+     3.04,
+     8.8,
+     18.1,
+     467.0
+    ],
+    [
+     11.5,
+     1340.0,
+     12000.0
+    ],
+    0.162,
+    0.381,
+    7.77,
+    0.00619,
+    468,
+    1254.0,
+    632.8
+   ],
+   "PENDLE-USD": [
+    "longtail_crypto",
+    "crypto",
+    4,
+    2,
+    2.3801,
+    1.0,
+    0.42,
+    [
+     239.0,
+     254.0,
+     276.0
+    ],
+    [
+     101.0,
+     107.0,
+     116.0
+    ],
+    [
+     7.0,
+     3406.0
+    ],
+    0.192,
+    3.01,
+    0,
+    [
+     53.7,
+     88.9,
+     1520.0,
+     null
+    ],
+    [
+     10.2,
+     1340.0,
+     4250.0
+    ],
+    0.107,
+    0.463,
+    3.64,
+    0.000238,
+    18,
+    15260.0,
+    7667.0
+   ],
+   "MORPHO-USD": [
+    "longtail_crypto",
+    "crypto",
+    4,
+    2,
+    2.5843,
+    1.0,
+    0.387,
+    [
+     5.0,
+     13.0,
+     18.0
+    ],
+    [
+     2.03,
+     4.97,
+     6.95
+    ],
+    [
+     5.0,
+     463.0
+    ],
+    0.223,
+    1.94,
+    0.00347,
+    [
+     2.49,
+     6.49,
+     18.1,
+     4150.0
+    ],
+    [
+     11.4,
+     6330.0,
+     74200.0
+    ],
+    0.144,
+    0.498,
+    9.59,
+    0.00623,
+    471,
+    1538.0,
+    771.5
+   ],
+   "CBRS-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    188.37,
+    1.0,
+    0.531,
+    [
+     1.0,
+     10.0,
+     15.0
+    ],
+    [
+     0.549,
+     5.37,
+     7.98
+    ],
+    [
+     2.0,
+     6931.0
+    ],
+    0.362,
+    1.07,
+    0,
+    [
+     2.69,
+     7.28,
+     41.1,
+     null
+    ],
+    [
+     168.0,
+     31800.0,
+     62500.0
+    ],
+    0.00024,
+    0.372,
+    5.64,
+    0.00709,
+    536,
+    795.1,
+    396.9
+   ],
+   "MRVL-USD": [
+    "tradfi",
+    "equity",
+    2,
+    4,
+    263.23,
+    1.0,
+    0.38,
+    [
+     13.0,
+     16.0,
+     19.0
+    ],
+    [
+     4.98,
+     6.15,
+     7.34
+    ],
+    [
+     5.0,
+     336.0
+    ],
+    0.342,
+    1.89,
+    0.252,
+    [
+     3.08,
+     5.52,
+     12.0,
+     515.0
+    ],
+    [
+     11.3,
+     9180.0,
+     51200.0
+    ],
+    0.181,
+    0.564,
+    6.61,
+    0.000225,
+    17,
+    29380.0,
+    14580.0
+   ],
+   "EWY-USD": [
+    "tradfi",
+    "index",
+    2,
+    4,
+    185.14,
+    1.0,
+    0.54,
+    [
+     10.0,
+     12.0,
+     13.0
+    ],
+    [
+     5.42,
+     6.46,
+     7.06
+    ],
+    [
+     7.0,
+     454.0
+    ],
+    0.267,
+    3.78,
+    0.0478,
+    [
+     3.23,
+     6.59,
+     30.1,
+     3950.0
+    ],
+    [
+     10.9,
+     4920.0,
+     126000.0
+    ],
+    0.208,
+    0.411,
+    3.73,
+    0.000106,
+    8,
+    35240.0,
+    17470.0
+   ],
+   "NCLD-USD": [
+    "tradfi",
+    "index",
+    3,
+    3,
+    24.051,
+    1.0,
+    0.416,
+    [
+     16.0,
+     22.0,
+     83.0
+    ],
+    [
+     6.72,
+     8.99,
+     34.3
+    ],
+    [
+     268.0,
+     6190.0
+    ],
+    0.0757,
+    109.0,
+    0,
+    [
+     4.49,
+     45.9,
+     1260.0,
+     null
+    ],
+    [
+     10.2,
+     20.2,
+     9860.0
+    ],
+    0.11,
+    0.32,
+    0.456,
+    0.00409,
+    309,
+    111.5,
+    55.23
+   ],
+   "SOXL-USD": [
+    "tradfi",
+    "index",
+    2,
+    4,
+    146.79,
+    1.0,
+    0.681,
+    [
+     7.0,
+     9.0,
+     11.0
+    ],
+    [
+     4.77,
+     6.25,
+     7.54
+    ],
+    [
+     3.0,
+     322.0
+    ],
+    0.383,
+    2.06,
+    0.228,
+    [
+     3.12,
+     9.6,
+     16.1,
+     751.0
+    ],
+    [
+     10.8,
+     9840.0,
+     15200.0
+    ],
+    0.156,
+    0.51,
+    15.0,
+    0.0175,
+    1321,
+    856.5,
+    426.9
+   ],
+   "UNITREE-USD": [
+    "tradfi",
+    "equity",
+    3,
+    3,
+    68.391,
+    1.0,
+    0.146,
+    [
+     30.0,
+     35.0,
+     38.0
+    ],
+    [
+     4.45,
+     5.2,
+     5.62
+    ],
+    [
+     11.0,
+     26978.0
+    ],
+    0.287,
+    1.62,
+    0,
+    [
+     2.6,
+     4.22,
+     4080.0,
+     null
+    ],
+    [
+     10.8,
+     989.0,
+     8970.0
+    ],
+    0.296,
+    0.571,
+    1.86,
+    0.000357,
+    27,
+    5195.0,
+    2591.0
+   ]
+  }
+ },
+ "per_hour_robustness_all21": {
+  "columns": [
+   "spread_bps_p50",
+   "gap_rt_share_1",
+   "depth_usd_p10_p50_p90",
+   "dist_k20_bps_p50",
+   "dust_share",
+   "repeat_share",
+   "nonfill_changes_per_s_total",
+   "trades_per_s_total",
+   "n_trades",
+   "nonfill_changes_per_trade"
+  ],
+  "rows": {
+   "2026-09-29T16": {
+    "all": [
+     4.54,
+     0.39,
+     [
+      49.7,
+      11200.0,
+      131000.0
+     ],
+     30.5,
+     0.0902,
+     0.339,
+     1118.0,
+     0.8501,
+     3058,
+     1320.0
+    ],
+    "majors": [
+     0.376,
+     0.613,
+     [
+      1250.0,
+      12300.0,
+      126000.0
+     ],
+     14.3,
+     0.0295,
+     0.127,
+     54.0,
+     0.3,
+     1085,
+     178.9
+    ],
+    "alt_crypto": [
+     5.19,
+     0.294,
+     [
+      11.2,
+      6410.0,
+      69300.0
+     ],
+     71.5,
+     0.113,
+     0.336,
+     432.0,
+     0.2832,
+     1022,
+     1522.0
+    ],
+    "longtail_crypto": [
+     5.6,
+     0.179,
+     [
+      10.9,
+      3330.0,
+      29000.0
+     ],
+     145.0,
+     0.135,
+     0.382,
+     189.8,
+     0.143,
+     516,
+     1327.0
+    ],
+    "tradfi": [
+     4.18,
+     0.481,
+     [
+      135.0,
+      34200.0,
+      200000.0
+     ],
+     16.4,
+     0.0703,
+     0.344,
+     445.4,
+     0.121,
+     435,
+     3683.0
+    ]
+   },
+   "2026-09-29T19": {
+    "all": [
+     4.43,
+     0.388,
+     [
+      59.6,
+      10300.0,
+      124000.0
+     ],
+     29.9,
+     0.0874,
+     0.329,
+     827.2,
+     0.565,
+     2016,
+     1464.0
+    ],
+    "majors": [
+     0.369,
+     0.629,
+     [
+      1340.0,
+      11300.0,
+      152000.0
+     ],
+     13.9,
+     0.0249,
+     0.111,
+     33.9,
+     0.108,
+     385,
+     314.0
+    ],
+    "alt_crypto": [
+     5.19,
+     0.303,
+     [
+      11.4,
+      6430.0,
+      71200.0
+     ],
+     64.6,
+     0.107,
+     0.327,
+     278.4,
+     0.1937,
+     691,
+     1437.0
+    ],
+    "longtail_crypto": [
+     5.29,
+     0.19,
+     [
+      11.2,
+      3390.0,
+      29700.0
+     ],
+     133.0,
+     0.13,
+     0.363,
+     127.5,
+     0.08268,
+     295,
+     1542.0
+    ],
+    "tradfi": [
+     4.02,
+     0.47,
+     [
+      134.0,
+      28100.0,
+      176000.0
+     ],
+     16.9,
+     0.07,
+     0.337,
+     387.8,
+     0.181,
+     645,
+     2144.0
+    ]
+   },
+   "2026-09-29T20": {
+    "all": [
+     4.35,
+     0.394,
+     [
+      70.9,
+      10900.0,
+      117000.0
+     ],
+     29.7,
+     0.0853,
+     0.338,
+     536.8,
+     0.3652,
+     1314,
+     1470.0
+    ],
+    "majors": [
+     0.375,
+     0.631,
+     [
+      1340.0,
+      11600.0,
+      152000.0
+     ],
+     14.0,
+     0.0215,
+     0.101,
+     22.23,
+     0.0546,
+     197,
+     406.0
+    ],
+    "alt_crypto": [
+     5.12,
+     0.3,
+     [
+      11.4,
+      6430.0,
+      71000.0
+     ],
+     67.0,
+     0.107,
+     0.327,
+     244.8,
+     0.1812,
+     652,
+     1346.0
+    ],
+    "longtail_crypto": [
+     5.29,
+     0.189,
+     [
+      11.2,
+      3380.0,
+      29800.0
+     ],
+     108.0,
+     0.131,
+     0.368,
+     124.2,
+     0.05252,
+     189,
+     2363.0
+    ],
+    "tradfi": [
+     3.89,
+     0.484,
+     [
+      148.0,
+      30200.0,
+      175000.0
+     ],
+     15.9,
+     0.0661,
+     0.353,
+     146.4,
+     0.0768,
+     276,
+     1911.0
+    ]
+   },
+   "2026-09-29T21": {
+    "all": [
+     4.34,
+     0.391,
+     [
+      65.0,
+      11100.0,
+      137000.0
+     ],
+     29.7,
+     0.086,
+     0.333,
+     394.2,
+     0.44,
+     1583,
+     895.7
+    ],
+    "majors": [
+     0.376,
+     0.627,
+     [
+      1340.0,
+      11600.0,
+      154000.0
+     ],
+     14.1,
+     0.0229,
+     0.106,
+     21.0,
+     0.123,
+     443,
+     170.6
+    ],
+    "alt_crypto": [
+     5.16,
+     0.297,
+     [
+      11.4,
+      6420.0,
+      71300.0
+     ],
+     68.1,
+     0.107,
+     0.323,
+     194.2,
+     0.1375,
+     495,
+     1412.0
+    ],
+    "longtail_crypto": [
+     5.15,
+     0.187,
+     [
+      11.2,
+      3720.0,
+      29700.0
+     ],
+     112.0,
+     0.132,
+     0.364,
+     95.55,
+     0.06279,
+     226,
+     1521.0
+    ],
+    "tradfi": [
+     3.84,
+     0.479,
+     [
+      143.0,
+      30600.0,
+      201000.0
+     ],
+     16.2,
+     0.0667,
+     0.345,
+     83.04,
+     0.1162,
+     419,
+     715.3
+    ]
+   },
+   "2026-09-29T22": {
+    "all": [
+     4.19,
+     0.394,
+     [
+      64.1,
+      10900.0,
+      135000.0
+     ],
+     29.8,
+     0.0865,
+     0.338,
+     460.2,
+     0.4391,
+     1580,
+     1049.0
+    ],
+    "majors": [
+     0.376,
+     0.619,
+     [
+      1340.0,
+      11800.0,
+      153000.0
+     ],
+     13.9,
+     0.0241,
+     0.111,
+     27.39,
+     0.096,
+     346,
+     284.9
+    ],
+    "alt_crypto": [
+     5.15,
+     0.302,
+     [
+      11.4,
+      6420.0,
+      70900.0
+     ],
+     66.5,
+     0.108,
+     0.326,
+     212.4,
+     0.1152,
+     415,
+     1841.0
+    ],
+    "longtail_crypto": [
+     5.11,
+     0.184,
+     [
+      11.2,
+      3740.0,
+      29600.0
+     ],
+     120.0,
+     0.129,
+     0.356,
+     100.6,
+     0.1141,
+     411,
+     880.7
+    ],
+    "tradfi": [
+     3.7,
+     0.485,
+     [
+      139.0,
+      30300.0,
+      200000.0
+     ],
+     16.4,
+     0.068,
+     0.355,
+     120.5,
+     0.1133,
+     408,
+     1061.0
+    ]
+   },
+   "2026-09-29T23": {
+    "all": [
+     4.52,
+     0.383,
+     [
+      53.5,
+      10400.0,
+      131000.0
+     ],
+     32.4,
+     0.0903,
+     0.355,
+     521.0,
+     0.9504,
+     3405,
+     550.3
+    ],
+    "majors": [
+     0.376,
+     0.625,
+     [
+      1340.0,
+      12300.0,
+      153000.0
+     ],
+     14.0,
+     0.0242,
+     0.115,
+     24.3,
+     0.0771,
+     277,
+     315.6
+    ],
+    "alt_crypto": [
+     5.01,
+     0.301,
+     [
+      11.4,
+      6420.0,
+      71000.0
+     ],
+     69.7,
+     0.109,
+     0.328,
+     256.8,
+     0.4728,
+     1699,
+     544.1
+    ],
+    "longtail_crypto": [
+     5.27,
+     0.18,
+     [
+      11.2,
+      3630.0,
+      29500.0
+     ],
+     105.0,
+     0.135,
+     0.362,
+     121.9,
+     0.3042,
+     1097,
+     400.1
+    ],
+    "tradfi": [
+     4.23,
+     0.464,
+     [
+      132.0,
+      29300.0,
+      200000.0
+     ],
+     20.0,
+     0.0732,
+     0.384,
+     117.6,
+     0.09216,
+     332,
+     1274.0
+    ]
+   },
+   "2026-09-30T00": {
+    "all": [
+     4.31,
+     0.387,
+     [
+      61.3,
+      11000.0,
+      131000.0
+     ],
+     31.1,
+     0.0878,
+     0.332,
+     770.9,
+     1.021,
+     3664,
+     756.8
+    ],
+    "majors": [
+     0.376,
+     0.624,
+     [
+      1340.0,
+      12300.0,
+      146000.0
+     ],
+     13.9,
+     0.0268,
+     0.116,
+     31.8,
+     0.1707,
+     614,
+     186.6
+    ],
+    "alt_crypto": [
+     4.89,
+     0.301,
+     [
+      11.3,
+      6410.0,
+      70500.0
+     ],
+     73.0,
+     0.108,
+     0.321,
+     302.4,
+     0.4368,
+     1569,
+     692.9
+    ],
+    "longtail_crypto": [
+     5.32,
+     0.184,
+     [
+      11.3,
+      3650.0,
+      29600.0
+     ],
+     112.0,
+     0.133,
+     0.357,
+     137.8,
+     0.208,
+     749,
+     660.1
+    ],
+    "tradfi": [
+     3.94,
+     0.47,
+     [
+      146.0,
+      29700.0,
+      198000.0
+     ],
+     18.5,
+     0.0693,
+     0.346,
+     299.0,
+     0.2035,
+     732,
+     1471.0
+    ]
+   },
+   "2026-09-30T01": {
+    "all": [
+     4.4,
+     0.394,
+     [
+      63.6,
+      11600.0,
+      134000.0
+     ],
+     31.5,
+     0.0878,
+     0.331,
+     826.3,
+     0.5095,
+     1834,
+     1621.0
+    ],
+    "majors": [
+     0.376,
+     0.626,
+     [
+      1330.0,
+      12300.0,
+      152000.0
+     ],
+     14.0,
+     0.0243,
+     0.113,
+     37.5,
+     0.0777,
+     280,
+     483.3
+    ],
+    "alt_crypto": [
+     5.06,
+     0.306,
+     [
+      11.4,
+      6410.0,
+      70300.0
+     ],
+     71.4,
+     0.109,
+     0.324,
+     328.8,
+     0.2278,
+     820,
+     1445.0
+    ],
+    "longtail_crypto": [
+     5.21,
+     0.184,
+     [
+      11.3,
+      3360.0,
+      29700.0
+     ],
+     119.0,
+     0.135,
+     0.372,
+     153.4,
+     0.13,
+     470,
+     1178.0
+    ],
+    "tradfi": [
+     4.1,
+     0.48,
+     [
+      152.0,
+      30500.0,
+      200000.0
+     ],
+     17.7,
+     0.0684,
+     0.339,
+     305.8,
+     0.07344,
+     264,
+     4166.0
+    ]
+   },
+   "2026-09-30T02": {
+    "all": [
+     4.39,
+     0.39,
+     [
+      59.7,
+      11700.0,
+      136000.0
+     ],
+     33.3,
+     0.0882,
+     0.328,
+     738.3,
+     0.6098,
+     2195,
+     1211.0
+    ],
+    "majors": [
+     0.376,
+     0.618,
+     [
+      1330.0,
+      12400.0,
+      152000.0
+     ],
+     14.1,
+     0.0259,
+     0.114,
+     37.8,
+     0.1434,
+     516,
+     264.1
+    ],
+    "alt_crypto": [
+     5.09,
+     0.297,
+     [
+      11.3,
+      6390.0,
+      71100.0
+     ],
+     75.1,
+     0.11,
+     0.321,
+     295.2,
+     0.1483,
+     534,
+     1996.0
+    ],
+    "longtail_crypto": [
+     5.21,
+     0.181,
+     [
+      11.3,
+      2970.0,
+      29700.0
+     ],
+     157.0,
+     0.135,
+     0.364,
+     135.2,
+     0.1106,
+     398,
+     1224.0
+    ],
+    "tradfi": [
+     4.0,
+     0.48,
+     [
+      151.0,
+      30400.0,
+      200000.0
+     ],
+     17.9,
+     0.0686,
+     0.336,
+     268.8,
+     0.2074,
+     747,
+     1296.0
+    ]
+   },
+   "2026-09-30T03": {
+    "all": [
+     4.43,
+     0.39,
+     [
+      63.9,
+      11600.0,
+      135000.0
+     ],
+     32.6,
+     0.0869,
+     0.328,
+     626.6,
+     0.5931,
+     2134,
+     1057.0
+    ],
+    "majors": [
+     0.376,
+     0.636,
+     [
+      1350.0,
+      12300.0,
+      142000.0
+     ],
+     14.0,
+     0.0221,
+     0.111,
+     30.9,
+     0.1488,
+     535,
+     207.8
+    ],
+    "alt_crypto": [
+     5.12,
+     0.304,
+     [
+      11.2,
+      6390.0,
+      70800.0
+     ],
+     73.9,
+     0.108,
+     0.319,
+     256.8,
+     0.2086,
+     751,
+     1235.0
+    ],
+    "longtail_crypto": [
+     5.18,
+     0.183,
+     [
+      11.2,
+      3000.0,
+      29700.0
+     ],
+     149.0,
+     0.135,
+     0.361,
+     128.0,
+     0.156,
+     562,
+     819.8
+    ],
+    "tradfi": [
+     4.09,
+     0.473,
+     [
+      155.0,
+      30400.0,
+      200000.0
+     ],
+     17.5,
+     0.0675,
+     0.34,
+     209.8,
+     0.07968,
+     286,
+     2641.0
+    ]
+   },
+   "2026-09-30T04": {
+    "all": [
+     4.47,
+     0.386,
+     [
+      64.1,
+      11300.0,
+      131000.0
+     ],
+     33.0,
+     0.0867,
+     0.327,
+     545.6,
+     0.4506,
+     1620,
+     1212.0
+    ],
+    "majors": [
+     0.376,
+     0.627,
+     [
+      1340.0,
+      12400.0,
+      132000.0
+     ],
+     14.1,
+     0.0267,
+     0.121,
+     23.76,
+     0.0993,
+     357,
+     239.6
+    ],
+    "alt_crypto": [
+     4.99,
+     0.303,
+     [
+      11.2,
+      6420.0,
+      71800.0
+     ],
+     74.5,
+     0.107,
+     0.312,
+     232.3,
+     0.1486,
+     535,
+     1563.0
+    ],
+    "longtail_crypto": [
+     5.11,
+     0.188,
+     [
+      11.3,
+      3340.0,
+      29800.0
+     ],
+     132.0,
+     0.134,
+     0.371,
+     128.8,
+     0.1534,
+     550,
+     842.8
+    ],
+    "tradfi": [
+     4.23,
+     0.466,
+     [
+      150.0,
+      29800.0,
+      200000.0
+     ],
+     19.1,
+     0.0674,
+     0.337,
+     160.3,
+     0.04944,
+     178,
+     3244.0
+    ]
+   },
+   "2026-09-30T05": {
+    "all": [
+     4.54,
+     0.391,
+     [
+      64.2,
+      11800.0,
+      131000.0
+     ],
+     33.4,
+     0.0868,
+     0.333,
+     732.2,
+     0.5192,
+     1869,
+     1409.0
+    ],
+    "majors": [
+     0.376,
+     0.62,
+     [
+      1350.0,
+      12600.0,
+      130000.0
+     ],
+     13.9,
+     0.0219,
+     0.117,
+     32.1,
+     0.1344,
+     484,
+     239.6
+    ],
+    "alt_crypto": [
+     5.09,
+     0.301,
+     [
+      11.4,
+      6420.0,
+      71300.0
+     ],
+     73.4,
+     0.106,
+     0.318,
+     285.6,
+     0.1942,
+     699,
+     1471.0
+    ],
+    "longtail_crypto": [
+     5.27,
+     0.189,
+     [
+      11.3,
+      3350.0,
+      29600.0
+     ],
+     102.0,
+     0.135,
+     0.379,
+     145.6,
+     0.1165,
+     419,
+     1249.0
+    ],
+    "tradfi": [
+     4.3,
+     0.477,
+     [
+      151.0,
+      30500.0,
+      200000.0
+     ],
+     18.0,
+     0.0683,
+     0.343,
+     268.8,
+     0.0744,
+     267,
+     3620.0
+    ]
+   },
+   "2026-09-30T06": {
+    "all": [
+     4.5,
+     0.387,
+     [
+      58.9,
+      11100.0,
+      132000.0
+     ],
+     33.3,
+     0.0883,
+     0.337,
+     791.1,
+     0.5526,
+     1990,
+     1430.0
+    ],
+    "majors": [
+     0.376,
+     0.621,
+     [
+      1340.0,
+      12300.0,
+      149000.0
+     ],
+     14.1,
+     0.024,
+     0.115,
+     39.3,
+     0.1776,
+     639,
+     221.1
+    ],
+    "alt_crypto": [
+     5.03,
+     0.301,
+     [
+      11.4,
+      6390.0,
+      72200.0
+     ],
+     72.9,
+     0.106,
+     0.326,
+     316.8,
+     0.1937,
+     697,
+     1632.0
+    ],
+    "longtail_crypto": [
+     5.31,
+     0.19,
+     [
+      11.2,
+      3330.0,
+      29500.0
+     ],
+     107.0,
+     0.133,
+     0.374,
+     148.2,
+     0.09581,
+     345,
+     1544.0
+    ],
+    "tradfi": [
+     4.27,
+     0.47,
+     [
+      135.0,
+      30100.0,
+      200000.0
+     ],
+     18.6,
+     0.0714,
+     0.347,
+     287.5,
+     0.08592,
+     309,
+     3348.0
+    ]
+   },
+   "2026-09-30T07": {
+    "all": [
+     4.46,
+     0.391,
+     [
+      64.3,
+      11700.0,
+      132000.0
+     ],
+     33.3,
+     0.0862,
+     0.332,
+     719.8,
+     0.6582,
+     2370,
+     1093.0
+    ],
+    "majors": [
+     0.376,
+     0.623,
+     [
+      1340.0,
+      12300.0,
+      130000.0
+     ],
+     13.9,
+     0.0255,
+     0.121,
+     32.7,
+     0.219,
+     788,
+     150.0
+    ],
+    "alt_crypto": [
+     4.97,
+     0.308,
+     [
+      11.9,
+      6400.0,
+      72200.0
+     ],
+     70.5,
+     0.102,
+     0.32,
+     300.0,
+     0.1678,
+     604,
+     1794.0
+    ],
+    "longtail_crypto": [
+     5.19,
+     0.193,
+     [
+      11.1,
+      3000.0,
+      29700.0
+     ],
+     138.0,
+     0.136,
+     0.366,
+     136.5,
+     0.07579,
+     273,
+     1803.0
+    ],
+    "tradfi": [
+     4.25,
+     0.471,
+     [
+      142.0,
+      30600.0,
+      200000.0
+     ],
+     18.6,
+     0.0685,
+     0.344,
+     249.1,
+     0.1958,
+     705,
+     1273.0
+    ]
+   },
+   "2026-09-30T08": {
+    "all": [
+     4.35,
+     0.385,
+     [
+      20.0,
+      9920.0,
+      131000.0
+     ],
+     34.0,
+     0.0898,
+     0.337,
+     759.4,
+     0.638,
+     2296,
+     1190.0
+    ],
+    "majors": [
+     0.376,
+     0.622,
+     [
+      1340.0,
+      12400.0,
+      138000.0
+     ],
+     14.0,
+     0.0239,
+     0.127,
+     33.9,
+     0.1329,
+     478,
+     255.5
+    ],
+    "alt_crypto": [
+     4.92,
+     0.305,
+     [
+      11.8,
+      6410.0,
+      72600.0
+     ],
+     72.0,
+     0.103,
+     0.32,
+     312.0,
+     0.24,
+     864,
+     1298.0
+    ],
+    "longtail_crypto": [
+     5.25,
+     0.189,
+     [
+      11.2,
+      2890.0,
+      29700.0
+     ],
+     152.0,
+     0.137,
+     0.357,
+     132.6,
+     0.06331,
+     228,
+     2090.0
+    ],
+    "tradfi": [
+     3.98,
+     0.465,
+     [
+      20.2,
+      25500.0,
+      201000.0
+     ],
+     18.4,
+     0.0744,
+     0.356,
+     281.8,
+     0.2016,
+     726,
+     1396.0
+    ]
+   },
+   "2026-09-30T09": {
+    "all": [
+     4.53,
+     0.381,
+     [
+      19.6,
+      10400.0,
+      136000.0
+     ],
+     32.1,
+     0.0958,
+     0.35,
+     691.7,
+     0.6934,
+     2493,
+     997.2
+    ],
+    "majors": [
+     0.376,
+     0.63,
+     [
+      1340.0,
+      12400.0,
+      130000.0
+     ],
+     14.0,
+     0.0246,
+     0.125,
+     36.0,
+     0.2559,
+     920,
+     141.2
+    ],
+    "alt_crypto": [
+     4.83,
+     0.306,
+     [
+      11.9,
+      6420.0,
+      72300.0
+     ],
+     69.0,
+     0.103,
+     0.321,
+     300.0,
+     0.264,
+     953,
+     1134.0
+    ],
+    "longtail_crypto": [
+     5.34,
+     0.192,
+     [
+      11.3,
+      3000.0,
+      29700.0
+     ],
+     131.0,
+     0.144,
+     0.382,
+     124.0,
+     0.08229,
+     296,
+     1506.0
+    ],
+    "tradfi": [
+     4.35,
+     0.457,
+     [
+      49.4,
+      31100.0,
+      201000.0
+     ],
+     17.4,
+     0.0834,
+     0.374,
+     230.4,
+     0.09024,
+     324,
+     2559.0
+    ]
+   },
+   "2026-09-30T10": {
+    "all": [
+     4.5,
+     0.386,
+     [
+      20.7,
+      11300.0,
+      139000.0
+     ],
+     31.5,
+     0.0933,
+     0.351,
+     632.7,
+     0.6169,
+     2220,
+     1026.0
+    ],
+    "majors": [
+     0.37,
+     0.622,
+     [
+      1330.0,
+      12400.0,
+      130000.0
+     ],
+     14.0,
+     0.0272,
+     0.118,
+     29.88,
+     0.192,
+     691,
+     155.6
+    ],
+    "alt_crypto": [
+     4.8,
+     0.304,
+     [
+      11.7,
+      6410.0,
+      73200.0
+     ],
+     67.7,
+     0.104,
+     0.315,
+     264.0,
+     0.2784,
+     1004,
+     944.2
+    ],
+    "longtail_crypto": [
+     5.41,
+     0.191,
+     [
+      11.3,
+      3350.0,
+      29900.0
+     ],
+     94.4,
+     0.139,
+     0.384,
+     114.7,
+     0.08385,
+     302,
+     1367.0
+    ],
+    "tradfi": [
+     4.34,
+     0.469,
+     [
+      63.8,
+      37600.0,
+      201000.0
+     ],
+     16.3,
+     0.0797,
+     0.38,
+     224.6,
+     0.06192,
+     223,
+     3626.0
+    ]
+   },
+   "2026-09-30T11": {
+    "all": [
+     4.77,
+     0.375,
+     [
+      11.5,
+      10000.0,
+      137000.0
+     ],
+     32.4,
+     0.103,
+     0.396,
+     714.6,
+     0.726,
+     2613,
+     983.8
+    ],
+    "majors": [
+     0.371,
+     0.604,
+     [
+      1230.0,
+      11000.0,
+      107000.0
+     ],
+     14.6,
+     0.0316,
+     0.15,
+     31.2,
+     0.2784,
+     1002,
+     112.5
+    ],
+    "alt_crypto": [
+     4.65,
+     0.293,
+     [
+      11.4,
+      6390.0,
+      71800.0
+     ],
+     94.7,
+     0.111,
+     0.337,
+     278.4,
+     0.204,
+     734,
+     1365.0
+    ],
+    "longtail_crypto": [
+     5.43,
+     0.194,
+     [
+      11.3,
+      3350.0,
+      44400.0
+     ],
+     139.0,
+     0.148,
+     0.421,
+     123.4,
+     0.1521,
+     547,
+     811.8
+    ],
+    "tradfi": [
+     4.78,
+     0.452,
+     [
+      20.2,
+      31100.0,
+      201000.0
+     ],
+     19.6,
+     0.0919,
+     0.439,
+     281.3,
+     0.09168,
+     330,
+     3066.0
+    ]
+   },
+   "2026-09-30T12": {
+    "all": [
+     4.67,
+     0.374,
+     [
+      19.3,
+      9810.0,
+      128000.0
+     ],
+     31.9,
+     0.096,
+     0.366,
+     1188.0,
+     1.496,
+     5398,
+     790.6
+    ],
+    "majors": [
+     0.369,
+     0.578,
+     [
+      1020.0,
+      12000.0,
+      114000.0
+     ],
+     14.5,
+     0.0329,
+     0.153,
+     63.6,
+     0.564,
+     2028,
+     113.0
+    ],
+    "alt_crypto": [
+     5.12,
+     0.294,
+     [
+      11.5,
+      6390.0,
+      69500.0
+     ],
+     73.1,
+     0.11,
+     0.333,
+     434.4,
+     0.4248,
+     1532,
+     1022.0
+    ],
+    "longtail_crypto": [
+     5.69,
+     0.189,
+     [
+      11.3,
+      2950.0,
+      29800.0
+     ],
+     94.5,
+     0.146,
+     0.413,
+     180.7,
+     0.1638,
+     590,
+     1101.0
+    ],
+    "tradfi": [
+     4.42,
+     0.45,
+     [
+      50.6,
+      25500.0,
+      200000.0
+     ],
+     19.6,
+     0.0803,
+     0.385,
+     504.0,
+     0.3466,
+     1248,
+     1460.0
+    ]
+   },
+   "2026-09-30T13": {
+    "all": [
+     4.77,
+     0.357,
+     [
+      19.6,
+      9090.0,
+      102000.0
+     ],
+     33.5,
+     0.0963,
+     0.353,
+     1628.0,
+     1.734,
+     6255,
+     938.7
+    ],
+    "majors": [
+     0.818,
+     0.573,
+     [
+      1060.0,
+      12800.0,
+      117000.0
+     ],
+     14.6,
+     0.03,
+     0.158,
+     82.2,
+     0.621,
+     2232,
+     132.5
+    ],
+    "alt_crypto": [
+     5.21,
+     0.286,
+     [
+      11.4,
+      6400.0,
+      70000.0
+     ],
+     75.2,
+     0.109,
+     0.327,
+     540.0,
+     0.48,
+     1724,
+     1128.0
+    ],
+    "longtail_crypto": [
+     5.74,
+     0.184,
+     [
+      11.2,
+      2500.0,
+      29800.0
+     ],
+     96.7,
+     0.148,
+     0.392,
+     211.9,
+     0.1885,
+     677,
+     1127.0
+    ],
+    "tradfi": [
+     4.48,
+     0.424,
+     [
+      49.3,
+      16100.0,
+      150000.0
+     ],
+     21.1,
+     0.0807,
+     0.369,
+     796.8,
+     0.4507,
+     1622,
+     1769.0
+    ]
+   },
+   "2026-09-30T14": {
+    "all": [
+     4.7,
+     0.371,
+     [
+      19.8,
+      10800.0,
+      129000.0
+     ],
+     32.7,
+     0.096,
+     0.357,
+     1672.0,
+     1.302,
+     4695,
+     1283.0
+    ],
+    "majors": [
+     0.378,
+     0.582,
+     [
+      1040.0,
+      12400.0,
+      116000.0
+     ],
+     14.2,
+     0.0281,
+     0.14,
+     88.2,
+     0.519,
+     1868,
+     169.9
+    ],
+    "alt_crypto": [
+     5.3,
+     0.288,
+     [
+      11.2,
+      6370.0,
+      67400.0
+     ],
+     80.7,
+     0.112,
+     0.335,
+     578.4,
+     0.3816,
+     1373,
+     1518.0
+    ],
+    "longtail_crypto": [
+     5.84,
+     0.185,
+     [
+      10.9,
+      2380.0,
+      29500.0
+     ],
+     96.0,
+     0.152,
+     0.402,
+     232.7,
+     0.169,
+     609,
+     1373.0
+    ],
+    "tradfi": [
+     4.37,
+     0.446,
+     [
+      110.0,
+      30200.0,
+      200000.0
+     ],
+     19.6,
+     0.0781,
+     0.37,
+     772.8,
+     0.2347,
+     845,
+     3298.0
+    ]
+   }
+  }
+ },
+ "generator_recipe": [
+  "1. Give each synthetic market a class and a price; real tick = 10^max(0, digits(price_ticks)-5) engine ticks; tick_bps = real tick / price.",
+  "2. Spread: tick-bound markets (majors; SP500, NAS100, GOLD) sample real ticks from by_class.majors.spread.real_ticks.pmf. Other markets: sample spread_bps ~ lognormal(spread.bps.ln_mean, ln_sd) of their class (or use the market row), ticks = max(1, round(bps / tick_bps)).",
+  "3. Ladder: 20 levels per side (thin classes: draw the count from levels_per_side). Gap to the next level: sample real ticks from gap_between_levels.by_level_index[1-4 | 5-9 | 10-19].ticks_pmf; the >10 tail: lognormal in bps (bps_ln_mean, bps_ln_sd) converted to ticks.",
+  "4. Depth per level: with prob by_level_index[k].dust_share put a $10-12.5 dust order; else draw from model_B: a clip from the clip menu (share-weighted, USD x U(0.95,1.05), lots fixed per market for a while) or the background lognormal. Level 1 is thin (median $1-3k), levels 3-10 carry the clips.",
+  "5. Reuse the same clip lots at several levels and on both sides (this is what produces the ~35% exact-size repeats); dust levels repeat their size ~86% of the time.",
+  "6. Requotes: per market, level-change events at rate requote.per_market_nonfill_changes_per_s (lognormal across markets), mix ~37% add / 37% remove / 13% size up / 13% size down, ~50% at levels 1-5, bursty per second (see nonfill_changes_in_one_second_pmf_buckets); >=1000 changes per trade overall. These are LOWER BOUNDS on maker messages."
+ ],
+ "caveats": [
+  "Only the top 20 levels per side are visible; levels_per_side is min(true count, 20) and depth beyond level 20 is unknown.",
+  "Requote counts are 1-second net level diffs: a level changed and restored within a second, or changed twice, counts once or zero; they are lower bounds on maker messages. Changes at a price that traded on that side in the same second are excluded (fill-attributed); 22% of trades print at a price not resting on the maker side in the previous snapshot (the level appeared within the second).",
+  "Window-edge effects are removed: only prices inside both snapshots' visible ranges are compared (naive whole-window diffs are 13% higher).",
+  "Trade counts per market are small (thin markets have 0-10 trades per hour), so per-market changes-per-trade ratios for thin markets are noisy even over 21 hours.",
+  "Class pooled real-tick distributions mix markets with different tick_bps; for non-tick-bound markets use bps and convert per market.",
+  "Depth percentiles use log bins of 1/100 decade (2.3% wide), interpolated; the clip-menu windows are +-7% and include some background mass.",
+  "US-equity-hours dependence: tradfi requote rate at 13 UTC (US open) is 3.5-5.4x the other two core hours; shape parameters vary much less across hours (per_hour_robustness_all21)."
+ ],
+ "validation": [
+  "Independent re-count (Decimal arithmetic, separate script book_work/spotcheck.py) for BTC-USD and DOGE-USD in 2026-09-30T10 reproduces the pipeline: naive changes/s 13.72 and 11.52, dust share 0.0001 and 0.132, BTC spread 1 real tick, DOGE spread median 45 real ticks.",
+  "core3 sanity counters: 0 crossed/locked books, 132 one-side-empty snapshots (long-tail), 0 snapshot gaps over 1.5 s, 0 off-grid levels, 0 non-integer spreads or gaps in real ticks."
+ ]
+}

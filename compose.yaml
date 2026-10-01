@@ -1,0 +1,138 @@
+# Containers for building, checking and recording (INFO.md 5a, docs/DECISIONS.md D-001).
+#
+# The guarantees come from what each container can see and reach, listed below. The ./dev
+# wrapper only picks the right container and guards against mistakes.
+#
+# No container sees ~/.ssh, /mnt/c, the Docker socket or the host's cargo. Wherever the
+# source is mounted, the real .git is hidden behind an empty tmpfs.
+#
+#   service         source                          network  cargo cache  also writable
+#   dev             read-only                       none     read-only    target
+#   recorder-build  read-only                       none     read-only    recorder-target
+#   fmt             read-write                      none     -            -
+#   fetch           read-only                       yes      read-write   -
+#   lock            read-only except Cargo.lock     yes      read-write   -
+#   check           read-only                       yes      read-only    advisories
+#   vet             read-only except supply-chain/  yes      read-only    -
+#   recorder        -                               yes      -            data/
+#   history         its own script, read-only       yes      -            data/
+#
+# The recorder runs the binary in recorder-target, mounted read-only.
+#
+# - Only cargo itself writes the cargo cache (fetch, lock). The third-party tools
+#   (cargo-audit and cargo-deny in check, cargo-vet in vet) get it read-only, so they
+#   can't tamper with the sources that dev and recorder-build compile.
+# - Our dependencies' build scripts and proc-macros run only in dev and recorder-build,
+#   with no network, no write access to the source, .git or the cargo cache.
+# - The recorder runs a binary built in its own volume by recorder-build, so code run by
+#   other builds (tests, benchmarks) can't replace it.
+#
+# What still runs with network: the recorder's own dependencies (tokio, rustls,
+# tungstenite; unavoidable, it is a network client) and the three supply-chain tools. The
+# tools' own dependency trees were compiled during `docker build` with network and not
+# reviewed. See docs/SUPPLY-CHAIN.md, "Not covered".
+
+name: perps
+
+x-base: &base
+  image: perps-dev:1.98.1
+  build:
+    context: docker
+    dockerfile: dev.Dockerfile
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  working_dir: /work
+  init: true
+
+services:
+  dev:
+    <<: *base
+    network_mode: none
+    # Keeps builds and benchmarks off the recorders' CPU; ./dev sets both (default: all
+    # but the last CPU for dev, the last one for the recorders).
+    cpuset: "${DEV_CPUS:-0}"
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: volume, source: cargo-home, target: /cargo, read_only: true }
+      - { type: volume, source: target, target: /target }
+
+  fmt:
+    <<: *base
+    network_mode: none
+    volumes:
+      - { type: bind, source: ., target: /work }
+      - { type: tmpfs, target: /work/.git }
+
+  fetch:
+    <<: *base
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: volume, source: cargo-home, target: /cargo }
+
+  lock:
+    <<: *base
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: bind, source: ./Cargo.lock, target: /work/Cargo.lock }
+      - { type: volume, source: cargo-home, target: /cargo }
+
+  check:
+    <<: *base
+    environment:
+      ALLOW: "${ALLOW:-}"
+      MIN_DAYS: "${MIN_DAYS:-14}"
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: volume, source: cargo-home, target: /cargo, read_only: true }
+      # Advisory databases (cargo audit: .cargo/audit.toml; cargo deny: deny.toml).
+      - { type: volume, source: advisories, target: /advisories }
+
+  vet:
+    <<: *base
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: bind, source: ./supply-chain, target: /work/supply-chain }
+      - { type: volume, source: cargo-home, target: /cargo, read_only: true }
+
+  recorder-build:
+    <<: *base
+    network_mode: none
+    command: ["cargo", "build", "--release", "--locked", "--offline", "-p", "recorder"]
+    environment:
+      PERPS_GIT_COMMIT: "${PERPS_GIT_COMMIT:-unknown}"
+    volumes:
+      - { type: bind, source: ., target: /work, read_only: true }
+      - { type: tmpfs, target: /work/.git }
+      - { type: volume, source: cargo-home, target: /cargo, read_only: true }
+      - { type: volume, source: recorder-target, target: /target }
+
+  # Long-running recorders, pinned to one CPU (./dev picks the last one, and keeps dev off
+  # it) so they stay out of the way of local benchmarks. They restart on crash or reboot, so data has as few
+  # gaps as possible.
+  recorder:
+    <<: *base
+    restart: unless-stopped
+    cpuset: "${RECORDER_CPU:-0}"
+    command: ["/target/release/recorder", "--out", "/data/ws"]
+    volumes:
+      - { type: bind, source: ./data, target: /data }
+      - { type: volume, source: recorder-target, target: /target, read_only: true }
+
+  history:
+    <<: *base
+    restart: unless-stopped
+    cpuset: "${RECORDER_CPU:-0}"
+    command: ["/work/tools/history/pull_history.sh", "/data/rest"]
+    volumes:
+      - { type: bind, source: ./tools/history, target: /work/tools/history, read_only: true }
+      - { type: bind, source: ./data, target: /data }
+
+volumes:
+  cargo-home:
+  target:
+  recorder-target:
+  advisories:

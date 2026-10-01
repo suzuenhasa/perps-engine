@@ -1,0 +1,8 @@
+#!/bin/sh
+# Second copy of the guard (.cargo/config.toml), for when RUSTC is overridden but
+# RUSTC_WRAPPER is not.
+if [ "${PERPS_IN_CONTAINER:-}" != "1" ]; then
+    echo "perps: refusing to run rustc on the host; build inside ./dev (INFO.md 5a)" >&2
+    exit 1
+fi
+exec "$@"

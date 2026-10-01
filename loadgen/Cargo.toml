@@ -1,0 +1,16 @@
+[package]
+name = "loadgen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Deterministic synthetic order flow for tests, benchmarks and (Milestone 3) open-loop load."
+
+[dependencies]
+engine.workspace = true
+k256.workspace = true
+pipeline.workspace = true
+gateway.workspace = true
+
+[lints]
+workspace = true

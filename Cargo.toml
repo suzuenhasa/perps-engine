@@ -1,0 +1,76 @@
+[workspace]
+resolver = "3"
+members = [
+    "engine",
+    "pipeline",
+    "gateway",
+    "loadgen",
+    "bench",
+    "tools/recorder",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+# Every external dependency is pinned to an exact version (INFO.md 5a). Versions were
+# chosen 2026-09-29 as the newest release at least two weeks old, and default features are
+# off wherever they would pull in code we don't use. See docs/DECISIONS.md (D-006).
+[workspace.dependencies]
+engine = { path = "engine" }
+loadgen = { path = "loadgen" }
+pipeline = { path = "pipeline" }
+gateway = { path = "gateway" }
+
+# Tests and benchmarks.
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+# Recorder only (never linked into the engine).
+tokio = { version = "=1.53.1", default-features = false, features = ["rt", "net", "time", "sync"] }
+tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# 0.23.45 fixes RUSTSEC-2026-0285. Published 2026-09-14, so past the 14-day delay on
+# 2026-09-29 (docs/SUPPLY-CHAIN.md).
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
+
+# Signatures (Milestone 3; D-006, owner's choice 2026-09-29): RustCrypto's pure-Rust
+# secp256k1, no C. Only ECDSA (sign in loadgen, verify in the gateways); no PKCS#8,
+# Schnorr, serde or OS randomness (keys are derived from seeds, and ECDSA signing is
+# deterministic, RFC 6979). Not `precomputed-tables`: in 0.14.0 it speeds up only k*G
+# (signing), not verification, and it needs k256's `std`, which also turns on OS
+# randomness. 0.14.0 was published 2026-07-08.
+k256 = { version = "=0.14.0", default-features = false, features = ["ecdsa"] }
+# Thread pinning (sched_setaffinity) in the pipeline: the one unsafe function outside test
+# binaries (docs/PIPELINE.md 19.1). Already locked at this version (through tokio and
+# others) and its build script was read in M0, so this adds no new code.
+libc = { version = "=0.2.189", default-features = false }
+# Optional, off by default (owner's choice 2026-09-30): Bitcoin Core's libsecp256k1 through
+# rust-bitcoin's wrapper, as a faster alternative verifier in the gateways, for a
+# side-by-side measurement with k256. Its C source is compiled by secp256k1-sys's build
+# script only when the gateway's `c-secp256k1` feature is on; the default build never
+# compiles it. `std` gives each thread its own verification context instead of one global
+# copy behind a spinlock that is rebuilt on every call (about 2.5 µs each); it adds no crate
+# and no OS randomness (`rand` stays off). 0.33.1 and secp256k1-sys 0.14.1 were published
+# 2026-08-29.
+secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+# Keep line tables so profiles and flamegraphs can point at source lines later.
+debug = "line-tables-only"
+
+[profile.bench]
+debug = "line-tables-only"
+
+# Optimise dependencies even in debug builds, so tests that sign or verify (k256) finish in
+# seconds; our own crates stay unoptimised for debugging (docs/PIPELINE.md C33).
+[profile.dev.package."*"]
+opt-level = 3

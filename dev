@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Run project commands inside the right container (compose.yaml, docs/DECISIONS.md D-001).
+# Never run cargo on the host for this project.
+#
+#   ./dev <command...>          build/test/bench/clippy/run: no network, source read-only
+#   ./dev fmt [args...]         cargo fmt: no network, may rewrite source files
+#   ./dev --net <command...>    download: cargo fetch
+#                               inspect: cargo audit|deny|tree|metadata,
+#                               tools/supply-chain/check-ages.sh, list-build-time-code.sh
+#   ./dev --write <command...>  update Cargo.lock: cargo generate-lockfile|update
+#                               update supply-chain/: cargo vet
+#   ./dev image                 build the container image
+#   ./dev record build|start|stop|status|logs
+#
+# The security comes from each container's mounts and network settings (compose.yaml).
+# The allowlists here only stop mistakes, such as a build in a container that has network.
+# DEV_CPUS (default: all but the last CPU) and RECORDER_CPU (default: the last) keep
+# builds and benchmarks off the recorders' CPU.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
+cpus="$(nproc)"
+if (( cpus >= 3 )); then last_dev=$(( cpus - 2 )); else last_dev=$(( cpus - 1 )); fi
+export DEV_CPUS="${DEV_CPUS:-0-$last_dev}" RECORDER_CPU="${RECORDER_CPU:-$(( cpus - 1 ))}"
+tty_flag=()
+[[ -t 0 && -t 1 ]] || tty_flag=(-T)
+
+run() { docker compose run --rm "${tty_flag[@]}" "$@"; }
+
+refuse() { echo "dev: $*" >&2; exit 2; }
+
+# Only the default container may take arguments that change what cargo builds or runs.
+no_risky_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      *..* | --config* | -Z* | --manifest-path*) refuse "argument '$arg' is only allowed in the default container" ;;
+    esac
+  done
+}
+
+case "${1:-}" in
+  --net)
+    shift
+    no_risky_args "$@"
+    # Only cargo itself may write the cargo cache (fetch); third-party tools get it read-only.
+    case "${1:-} ${2:-}" in
+      "cargo fetch") run fetch "$@" ;;
+      "cargo audit" | "cargo deny" | "cargo tree" | "cargo metadata") run check "$@" ;;
+      "tools/supply-chain/check-ages.sh "* | "tools/supply-chain/list-build-time-code.sh "*) run check "$@" ;;
+      *) refuse "--net runs only download/inspect commands, not '$*'" ;;
+    esac ;;
+  --write)
+    shift
+    no_risky_args "$@"
+    case "${1:-} ${2:-}" in
+      "cargo generate-lockfile" | "cargo update") run lock "$@" ;;
+      "cargo vet")
+        run vet "$@"
+        # cargo-vet may write only its three files; anything else there (a .git/config
+        # with hooks, say) would be read by tools on the host.
+        extra="$(find supply-chain -mindepth 1 -not -name config.toml -not -name audits.toml -not -name imports.lock)"
+        [[ -z "$extra" ]] || refuse "unexpected files in supply-chain/ after cargo vet; inspect before using git: $extra" ;;
+      *) refuse "--write runs only lockfile and vet commands, not '$*'" ;;
+    esac ;;
+  fmt)
+    shift
+    run fmt cargo fmt "$@" ;;
+  image)
+    docker compose build dev ;;
+  record)
+    mkdir -p data
+    case "${2:-status}" in
+      build)
+        commit="$(git rev-parse --short HEAD 2>/dev/null || echo none)"
+        git diff --quiet HEAD 2>/dev/null || commit="$commit-dirty"
+        PERPS_GIT_COMMIT="$commit" run recorder-build ;;
+      start)
+        # Recreate, so the containers run the binary and script as they are now, not
+        # whatever they started with.
+        docker compose up -d --force-recreate recorder history ;;
+      stop)   docker compose stop recorder history ;;
+      status) docker compose ps recorder history ;;
+      logs)   docker compose logs --tail=50 recorder history ;;
+      *) refuse "usage: ./dev record build|start|stop|status|logs" ;;
+    esac ;;
+  "" | -h | --help)
+    sed -n '2,18p' "$0" ;;
+  *)
+    run dev "$@" ;;
+esac
