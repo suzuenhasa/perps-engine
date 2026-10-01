@@ -328,7 +328,7 @@ mod tests {
     use engine::command::{Command, Deposit, PlaceOrder, SetMark, SetMarketParams, SetRiskTier};
     use engine::engine::EngineOptions;
     use engine::event::{CancelReason, RejectReason};
-    use engine::types::{Side, TimeInForce, order_id};
+    use engine::types::{MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
     const IDLE: IdleStrategy = IdleStrategy::SpinThenYield { spins: 16 };
 
@@ -338,51 +338,53 @@ mod tests {
     fn commands() -> Vec<Command> {
         let mut commands = vec![
             Command::SetMarketParams(SetMarketParams {
-                min_price: 1_000,
-                max_price: 1_000_000,
+                min_price: Price::new(1_000),
+                max_price: Price::new(1_000_000),
                 maker_fee_ppm: 0,
                 taker_fee_ppm: 0,
                 price_band_ppm: 20_000,
-                market: 1,
+                market: MarketId::new(1),
                 max_leverage: 10,
             }),
             Command::SetRiskTier(SetRiskTier {
-                lower_bound: 0,
-                market: 1,
+                lower_bound: Micros::ZERO,
+                market: MarketId::new(1),
                 max_leverage: 10,
                 index: 0,
                 count: 1,
             }),
-            Command::SetMark(SetMark { price: 100_000, market: 1 }),
-            Command::Deposit(Deposit { amount: 1_000_000_000_000, account: 1 }),
+            Command::SetMark(SetMark { price: Price::new(100_000), market: MarketId::new(1) }),
+            Command::Deposit(Deposit { amount: Micros::new(1_000_000_000_000), account: AccountId::new(1) }),
         ];
         for n in 1..=10 {
             commands.push(Command::PlaceOrder(PlaceOrder {
-                order_id: order_id(1, n),
-                price: 99_000 + i64::from(n),
-                qty: 10,
-                market: 1,
+                order_id: order_id(AccountId::new(1), OrderSeq::new(n)),
+                price: Price::new(99_000 + i64::from(n)),
+                qty: Qty::new(10),
+                market: MarketId::new(1),
                 side: Side::Buy,
                 tif: TimeInForce::Gtc,
                 post_only: false,
             }));
         }
         commands.push(Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(1, 11),
-            price: 99_000,
-            qty: 0, // rejected: InvalidQty
-            market: 1,
+            order_id: order_id(AccountId::new(1), OrderSeq::new(11)),
+            price: Price::new(99_000),
+            qty: Qty::ZERO, // rejected: InvalidQty
+            market: MarketId::new(1),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: false,
         }));
-        commands.push(Command::SetMark(SetMark { price: 95_000, market: 1 }));
+        commands.push(Command::SetMark(SetMark { price: Price::new(95_000), market: MarketId::new(1) }));
         commands
     }
 
     fn record(seq: u64, command: &Command) -> CoreRecord {
         let meta = match command {
-            Command::PlaceOrder(_) => Meta { source: Source::PreVerifiedClient, lane: 3, account: 1 },
+            Command::PlaceOrder(_) => {
+                Meta { source: Source::PreVerifiedClient, lane: 3, account: AccountId::new(1) }
+            }
             _ => Meta::OPERATOR,
         };
         CoreRecord {
@@ -519,7 +521,10 @@ mod tests {
     #[should_panic(expected = "the core got seq 7 but expected 6")]
     fn a_gap_in_the_seqs_stops_the_core() {
         let (mut core_in, core_out) = channel::<2>(4);
-        core_in.write(&record(7, &Command::SetMark(SetMark { price: 1, market: 1 })).to_words());
+        core_in.write(
+            &record(7, &Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(1) }))
+                .to_words(),
+        );
         drop(core_in);
         let (events_in, _events_out) = channel::<1>(64);
         let (stall, counters) = (SharedCounter::new(), ThreadCounters::new());
@@ -537,7 +542,7 @@ mod tests {
 
     impl CoreVerifier for FakeVerifier {
         fn verify(&self, account: AccountId, _: &Command, signed: &SignedFields) -> bool {
-            assert_eq!(account, 1);
+            assert_eq!(account, AccountId::new(1));
             self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             signed.signature[0] != 0
         }

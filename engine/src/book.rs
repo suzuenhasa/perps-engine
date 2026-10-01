@@ -82,7 +82,7 @@ use crate::command::PlaceOrder;
 use crate::event::{Ack, CancelReason, Cancelled, Event, EventSink, Fill, Modified, Reject, RejectReason};
 use crate::id_hash::{IdBuildHasher, IdMap};
 use crate::level_index::LevelIndex;
-use crate::types::{AccountId, MarketId, OrderId, Price, Qty, Side, TimeInForce, account_of};
+use crate::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce, account_of};
 
 /// Fixed parameters of one market's book.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -329,14 +329,14 @@ impl Book {
         (self.config.min_price..=self.config.max_price).contains(&price)
     }
 
-    /// The level number of a price that is in range.
+    /// The level number of a price that is in range: its distance from `min_price`, in ticks.
     fn level_of(&self, price: Price) -> usize {
-        (price - self.config.min_price) as usize
+        (price - self.config.min_price).ticks() as usize
     }
 
-    /// The price of a level number.
+    /// The price of a level number: `min_price` plus that many ticks.
     fn price_of(&self, level: usize) -> Price {
-        self.config.min_price + level as Price
+        self.config.min_price + Price::new(level as i64)
     }
 
     fn best_price(&self, side: Side) -> Option<Price> {
@@ -406,7 +406,7 @@ impl Book {
         mut remaining: Qty,
         events: &mut impl EventSink,
     ) -> Qty {
-        while remaining > 0 {
+        while remaining > Qty::ZERO {
             let Some(best) = self.best_price(side.opposite()) else { break };
             let crosses = match side {
                 Side::Buy => best <= limit,
@@ -431,8 +431,8 @@ impl Book {
                 taker_order: taker,
                 price: maker.price,
                 qty,
-                maker_fee: 0,
-                taker_fee: 0,
+                maker_fee: Micros::ZERO,
+                taker_fee: Micros::ZERO,
                 market: self.config.market,
                 taker_side: side,
             }));
@@ -652,9 +652,9 @@ impl Book {
                 let o = &self.slots[slot as usize];
                 let id = o.order_id;
                 assert_eq!(o.prev, prev, "broken backward link at price {price}");
-                assert_eq!(o.price, price, "order {id:#x} is in the wrong level");
-                assert!(o.qty > 0, "order {id:#x} rests with nothing left to fill");
-                assert_eq!(self.slot_of.get(&id), Some(&slot), "the id map is wrong for {id:#x}");
+                assert_eq!(o.price, price, "order {:#x} is in the wrong level", id.get());
+                assert!(o.qty > Qty::ZERO, "order {:#x} rests with nothing left to fill", id.get());
+                assert_eq!(self.slot_of.get(&id), Some(&slot), "the id map is wrong for {:#x}", id.get());
                 assert!(level_side.is_none_or(|s| s == o.side), "price {price} holds both bids and asks");
                 level_side = Some(o.side);
                 resting += 1;
@@ -681,7 +681,7 @@ impl Book {
             while slot != NIL {
                 let o = &self.slots[slot as usize];
                 let id = o.order_id;
-                assert_eq!(account_of(id), account, "order {id:#x} is in the wrong account's list");
+                assert_eq!(account_of(id), account, "order {:#x} is in the wrong account's list", id.get());
                 assert_eq!(o.account_prev, prev, "broken backward link in account {account}'s list");
                 assert_eq!(self.slot_of.get(&id), Some(&slot), "account {account} lists a freed slot");
                 listed += 1;
@@ -731,10 +731,10 @@ impl OrderBook for Book {
     /// zero), so they are resident already.
     fn prefault(&mut self) {
         let filler = OrderSlot {
-            order_id: 0,
-            price: 0,
-            qty: 0,
-            filled: 0,
+            order_id: OrderId::new(0),
+            price: Price::ZERO,
+            qty: Qty::ZERO,
+            filled: Qty::ZERO,
             prev: NIL,
             next: NIL,
             account_prev: NIL,
@@ -743,15 +743,19 @@ impl OrderBook for Book {
             post_only: false,
         };
         crate::prefault::touch_spare(&mut self.slots, filler);
-        crate::prefault::touch_map(&mut self.slot_of, |i| i as OrderId, || 0);
-        crate::prefault::touch_map(&mut self.account_orders, |i| i as AccountId, || AccountOrders::EMPTY);
+        crate::prefault::touch_map(&mut self.slot_of, |i| OrderId::new(i as u64), || 0);
+        crate::prefault::touch_map(
+            &mut self.account_orders,
+            |i| AccountId::new(i as u32),
+            || AccountOrders::EMPTY,
+        );
         self.bid_levels.prefault();
         self.ask_levels.prefault();
     }
 
     fn place(&mut self, order: &PlaceOrder, events: &mut impl EventSink) {
         let id = order.order_id;
-        if order.qty <= 0 {
+        if order.qty <= Qty::ZERO {
             return self.reject(id, RejectReason::InvalidQty, events);
         }
         if !self.price_in_range(order.price) {
@@ -766,7 +770,7 @@ impl OrderBook for Book {
 
         events.emit(Event::Ack(Ack { order_id: id }));
         let remaining = self.match_incoming(id, order.side, order.price, order.qty, events);
-        if remaining > 0 {
+        if remaining > Qty::ZERO {
             match order.tif {
                 TimeInForce::Gtc => {
                     self.rest(id, order.side, order.price, remaining, order.qty - remaining, order.post_only)
@@ -796,7 +800,7 @@ impl OrderBook for Book {
         let Some(&slot) = self.slot_of.get(&order_id) else {
             return self.reject(order_id, RejectReason::UnknownOrder, events);
         };
-        if new_size <= 0 {
+        if new_size <= Qty::ZERO {
             return self.reject(order_id, RejectReason::InvalidQty, events);
         }
         if !self.price_in_range(new_price) {
@@ -808,7 +812,7 @@ impl OrderBook for Book {
 
         // Sized at or below what already filled (typically a modify signed before a fill):
         // nothing is left to fill.
-        if new_remaining <= 0 {
+        if new_remaining <= Qty::ZERO {
             self.remove(slot);
             self.emit_cancelled(&order, CancelReason::SizeBelowFilled, events);
             self.debug_check_invariants();
@@ -838,7 +842,7 @@ impl OrderBook for Book {
         self.remove(slot);
         events.emit(modified);
         let left = self.match_incoming(order_id, order.side, new_price, new_remaining, events);
-        if left > 0 {
+        if left > Qty::ZERO {
             let filled = order.filled + (new_remaining - left);
             self.rest(order_id, order.side, new_price, left, filled, order.post_only);
         }
@@ -881,8 +885,8 @@ impl OrderBook for Book {
     }
 
     fn open_quantities(&self, account: AccountId) -> (Qty, Qty) {
-        let (mut buys, mut sells) = (0, 0);
-        let Some(list) = self.account_orders.get(&account) else { return (0, 0) };
+        let (mut buys, mut sells) = (Qty::ZERO, Qty::ZERO);
+        let Some(list) = self.account_orders.get(&account) else { return (Qty::ZERO, Qty::ZERO) };
         let mut slot = list.head;
         while slot != NIL {
             let order = &self.slots[slot as usize];
@@ -915,19 +919,29 @@ mod tests {
     //! slot an order uses. Where possible these also run the reference book and compare.
     use super::*;
     use crate::reference::ReferenceBook;
-    use crate::types::order_id;
+    use crate::types::{OrderSeq, order_id};
 
-    const MARKET: u16 = 1;
-    const ALICE: u32 = 1;
-    const BOB: u32 = 2;
-    const CAROL: u32 = 3;
-    const CONFIG: BookConfig = BookConfig { market: MARKET, min_price: 1, max_price: 1_000 };
+    const MARKET: MarketId = MarketId::new(1);
+    const ALICE: AccountId = AccountId::new(1);
+    const BOB: AccountId = AccountId::new(2);
+    const CAROL: AccountId = AccountId::new(3);
+    const CONFIG: BookConfig =
+        BookConfig { market: MARKET, min_price: Price::new(1), max_price: Price::new(1_000) };
 
-    fn order(account: u32, seq: u32, side: Side, price: Price, qty: Qty) -> PlaceOrder {
+    fn px(ticks: i64) -> Price {
+        Price::new(ticks)
+    }
+
+    fn lots(lots: i64) -> Qty {
+        Qty::new(lots)
+    }
+
+    /// A GTC order of `qty` lots at `price` ticks.
+    fn order(account: AccountId, seq: u32, side: Side, price: i64, qty: i64) -> PlaceOrder {
         PlaceOrder {
-            order_id: order_id(account, seq),
-            price,
-            qty,
+            order_id: order_id(account, OrderSeq::new(seq)),
+            price: px(price),
+            qty: lots(qty),
             market: MARKET,
             side,
             tif: TimeInForce::Gtc,
@@ -935,18 +949,20 @@ mod tests {
         }
     }
 
-    fn resting(o: PlaceOrder, qty: Qty, filled: Qty) -> RestingOrder {
+    /// `o` resting with `qty` lots left and `filled` lots filled.
+    fn resting(o: PlaceOrder, qty: i64, filled: i64) -> RestingOrder {
         RestingOrder {
             order_id: o.order_id,
             side: o.side,
             price: o.price,
-            qty,
-            filled,
+            qty: lots(qty),
+            filled: lots(filled),
             post_only: o.post_only,
         }
     }
 
-    fn cancelled(o: PlaceOrder, remaining: Qty, reason: CancelReason) -> Event {
+    fn cancelled(o: PlaceOrder, remaining: i64, reason: CancelReason) -> Event {
+        let remaining = lots(remaining);
         Event::Cancelled(Cancelled { order_id: o.order_id, remaining, market: MARKET, reason, side: o.side })
     }
 
@@ -1003,7 +1019,7 @@ mod tests {
         // The old id refers to nothing now, even though its slot is in use again.
         let unknown = vec![reject(old.order_id, RejectReason::UnknownOrder)];
         assert_eq!(apply_both(&mut b, &mut r, Call::Cancel(old.order_id)), unknown);
-        assert_eq!(apply_both(&mut b, &mut r, Call::Modify(old.order_id, 105, 9)), unknown);
+        assert_eq!(apply_both(&mut b, &mut r, Call::Modify(old.order_id, px(105), lots(9))), unknown);
         assert_eq!(b.snapshot().asks, vec![resting(new, 3, 0)]);
 
         // A maker's slot is freed when it fills completely, and reused the same way.
@@ -1021,9 +1037,9 @@ mod tests {
         // 300,000 levels, so four bitmap layers. Orders sit on both sides of the boundaries
         // of a word (64 levels), a layer-1 word (4,096) and a layer-2 word (262,144), and at
         // both ends of the range.
-        let config = BookConfig { market: MARKET, min_price: 1, max_price: 300_000 };
+        let config = BookConfig { market: MARKET, min_price: px(1), max_price: px(300_000) };
         let levels = [0, 63, 64, 4_095, 4_096, 262_143, 262_144, 299_999];
-        let prices = levels.map(|level| config.min_price + level as Price);
+        let prices = levels.map(|level| config.min_price.ticks() + level);
         let mut b = Book::new(config);
 
         // Asks: cancelling the best one each time moves the best ask up to the next level.
@@ -1031,8 +1047,8 @@ mod tests {
             apply(&mut b, Call::Place(order(ALICE, seq as u32, Side::Sell, price, 1)));
         }
         for (seq, &price) in prices.iter().enumerate() {
-            assert_eq!(b.best_ask(), Some(price));
-            apply(&mut b, Call::Cancel(order_id(ALICE, seq as u32)));
+            assert_eq!(b.best_ask(), Some(px(price)));
+            apply(&mut b, Call::Cancel(order_id(ALICE, OrderSeq::new(seq as u32))));
             b.assert_consistent();
         }
         assert_eq!(b.best_ask(), None);
@@ -1042,8 +1058,8 @@ mod tests {
             apply(&mut b, Call::Place(order(BOB, seq as u32, Side::Buy, price, 1)));
         }
         for (seq, &price) in prices.iter().enumerate().rev() {
-            assert_eq!(b.best_bid(), Some(price));
-            apply(&mut b, Call::Cancel(order_id(BOB, seq as u32)));
+            assert_eq!(b.best_bid(), Some(px(price)));
+            apply(&mut b, Call::Cancel(order_id(BOB, OrderSeq::new(seq as u32))));
             b.assert_consistent();
         }
         assert_eq!(b.best_bid(), None);
@@ -1052,7 +1068,7 @@ mod tests {
         for (seq, &price) in prices.iter().enumerate() {
             apply(&mut b, Call::Place(order(ALICE, 100 + seq as u32, Side::Sell, price, 1)));
         }
-        let sweep = order(BOB, 100, Side::Buy, config.max_price, prices.len() as Qty);
+        let sweep = order(BOB, 100, Side::Buy, config.max_price.ticks(), prices.len() as i64);
         let fill_prices: Vec<Price> = apply(&mut b, Call::Place(sweep))
             .into_iter()
             .filter_map(|event| match event {
@@ -1060,7 +1076,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(fill_prices, prices);
+        assert_eq!(fill_prices, prices.map(px));
         assert_eq!((b.best_bid(), b.best_ask()), (None, None));
         b.assert_consistent();
     }
@@ -1078,11 +1094,11 @@ mod tests {
         // A partial fill keeps a1's place: 1 filled, 1 left.
         apply_both(&mut b, &mut r, Call::Place(order(BOB, 2, Side::Sell, 100, 1)));
         // Growing to a total of 5 (4 left) is cancel-and-replace: a1 starts resting again.
-        apply_both(&mut b, &mut r, Call::Modify(a1.order_id, 100, 5));
+        apply_both(&mut b, &mut r, Call::Modify(a1.order_id, px(100), lots(5)));
         // Shrinking in place keeps a2's place.
-        apply_both(&mut b, &mut r, Call::Modify(a2.order_id, 105, 1));
+        apply_both(&mut b, &mut r, Call::Modify(a2.order_id, px(105), lots(1)));
         // A new price is cancel-and-replace: a3 starts resting again, after a1.
-        apply_both(&mut b, &mut r, Call::Modify(a3.order_id, 97, 3));
+        apply_both(&mut b, &mut r, Call::Modify(a3.order_id, px(97), lots(3)));
 
         assert_eq!(
             apply_both(&mut b, &mut r, Call::CancelAccount(ALICE)),
@@ -1125,27 +1141,27 @@ mod tests {
         // Bids above 101: the highest price first, oldest first within 103, a partly filled
         // bid with what is left of it; 101 itself stays.
         assert_eq!(
-            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, 101)),
+            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, px(101))),
             vec![
                 cancelled(second_103, 1, CancelReason::PriceBand),
                 cancelled(third_103, 3, CancelReason::PriceBand),
                 cancelled(at_102, 3, CancelReason::PriceBand),
             ]
         );
-        assert_eq!(b.best_bid(), Some(101));
+        assert_eq!(b.best_bid(), Some(px(101)));
         // Nothing is beyond the best price itself, and asks are untouched by a bid limit.
-        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, 101)).is_empty());
-        assert_eq!(b.best_ask(), Some(110));
+        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, px(101))).is_empty());
+        assert_eq!(b.best_ask(), Some(px(110)));
 
         // Asks below a limit, the mirror image; a limit past every order empties the side.
-        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Sell, 110)).is_empty());
+        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Sell, px(110))).is_empty());
         assert_eq!(
-            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Sell, 111)),
+            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Sell, px(111))),
             vec![cancelled(ask, 1, CancelReason::PriceBand)]
         );
         assert_eq!(b.best_ask(), None);
         assert_eq!(
-            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, 0)),
+            apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, px(0))),
             vec![
                 cancelled(at_101, 4, CancelReason::PriceBand),
                 cancelled(at_100, 5, CancelReason::PriceBand)
@@ -1153,7 +1169,7 @@ mod tests {
         );
         assert_eq!(b.snapshot(), BookSnapshot::default());
         // On an empty side it does nothing.
-        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, 0)).is_empty());
+        assert!(apply_both(&mut b, &mut r, Call::CancelBeyond(Side::Buy, px(0))).is_empty());
     }
 
     #[test]
@@ -1165,8 +1181,8 @@ mod tests {
         assert_eq!(b.order(bid.order_id), Some(resting(bid, 3, 2)));
         assert_eq!(r.order(bid.order_id), b.order(bid.order_id));
         // Filled, cancelled or never placed: not resting.
-        assert_eq!(b.order(order_id(BOB, 1)), None);
-        assert_eq!(r.order(order_id(BOB, 1)), None);
+        assert_eq!(b.order(order_id(BOB, OrderSeq::new(1))), None);
+        assert_eq!(r.order(order_id(BOB, OrderSeq::new(1))), None);
         apply_both(&mut b, &mut r, Call::Cancel(bid.order_id));
         assert_eq!((b.order(bid.order_id), r.order(bid.order_id)), (None, None));
     }
@@ -1184,9 +1200,9 @@ mod tests {
         }
         // Carol sells 3 at 100 into Alice's bid there, the older one: 2 of it are left.
         apply_both(&mut b, &mut r, Call::Place(order(CAROL, 1, Side::Sell, 100, 3)));
-        assert_eq!(b.open_quantities(ALICE), (2 + 7, 4));
-        assert_eq!(b.open_quantities(BOB), (50, 0));
-        assert_eq!(b.open_quantities(CAROL), (0, 0), "no orders resting");
+        assert_eq!(b.open_quantities(ALICE), (lots(2 + 7), lots(4)));
+        assert_eq!(b.open_quantities(BOB), (lots(50), Qty::ZERO));
+        assert_eq!(b.open_quantities(CAROL), (Qty::ZERO, Qty::ZERO), "no orders resting");
         for account in [ALICE, BOB, CAROL] {
             assert_eq!(r.open_quantities(account), b.open_quantities(account));
         }
@@ -1219,9 +1235,9 @@ mod tests {
         for seq in 0..count {
             let roll = random(100);
             let call = if roll < 55 || placed.is_empty() {
-                let account = 1 + random(5) as AccountId;
+                let account = AccountId::new(1 + random(5) as u32);
                 let side = if random(2) == 0 { Side::Buy } else { Side::Sell };
-                let (price, qty) = (95 + random(11) as Price, 1 + random(10) as Qty);
+                let (price, qty) = (95 + random(11) as i64, 1 + random(10) as i64);
                 let tif = if random(10) == 0 { TimeInForce::Ioc } else { TimeInForce::Gtc };
                 let post_only = random(10) == 0;
                 let o = PlaceOrder { tif, post_only, ..order(account, seq, side, price, qty) };
@@ -1231,12 +1247,12 @@ mod tests {
                 let target = placed[random(placed.len() as u64) as usize];
                 match roll {
                     55..80 => Call::Cancel(target),
-                    80..97 => Call::Modify(target, 95 + random(11) as Price, 1 + random(10) as Qty),
+                    80..97 => Call::Modify(target, px(95 + random(11) as i64), lots(1 + random(10) as i64)),
                     97..98 => {
                         let side = if random(2) == 0 { Side::Buy } else { Side::Sell };
-                        Call::CancelBeyond(side, 95 + random(11) as Price)
+                        Call::CancelBeyond(side, px(95 + random(11) as i64))
                     }
-                    _ => Call::CancelAccount(1 + random(5) as AccountId),
+                    _ => Call::CancelAccount(AccountId::new(1 + random(5) as u32)),
                 }
             };
             calls.push(call);
@@ -1272,18 +1288,18 @@ mod tests {
     #[test]
     #[should_panic(expected = "ticks wide")]
     fn a_price_range_one_tick_wider_than_max_levels_is_refused() {
-        Book::new(BookConfig { market: MARKET, min_price: 1, max_price: MAX_LEVELS as Price + 1 });
+        Book::new(BookConfig { market: MARKET, min_price: px(1), max_price: px(MAX_LEVELS as i64 + 1) });
     }
 
     #[test]
     #[should_panic(expected = "ticks wide")]
     fn the_widest_possible_price_range_is_refused_without_overflowing() {
-        Book::new(BookConfig { market: MARKET, min_price: Price::MIN, max_price: Price::MAX });
+        Book::new(BookConfig { market: MARKET, min_price: px(i64::MIN), max_price: px(i64::MAX) });
     }
 
     #[test]
     #[should_panic(expected = "empty price range")]
     fn an_empty_price_range_is_refused() {
-        Book::new(BookConfig { market: MARKET, min_price: 10, max_price: 9 });
+        Book::new(BookConfig { market: MARKET, min_price: px(10), max_price: px(9) });
     }
 }

@@ -21,7 +21,7 @@ fn only_the_written_spelling_of_a_registry_loads() {
         .into_iter()
         .map(|account| {
             let key = SigningKey::from_slice(&[account as u8; 32]).expect("a valid scalar");
-            (account, *key.verifying_key())
+            (AccountId::new(account), *key.verifying_key())
         })
         .collect();
     let canonical = registry_text(1, &keys);

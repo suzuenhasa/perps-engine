@@ -231,8 +231,12 @@ many positions per market.
 
 **Decision:** Prices are `i64` ticks, quantities `i64` lots, collateral `i64` micro-dollars.
 Because one tick times one lot is exactly one micro-dollar, a fill's notional is just
-`price × qty`. Products are computed in `i128` and checked on the way back to `i64`. The
-types are aliases, not newtypes.
+`price × qty`. Products that can exceed `i64` (a client's quantity before the size check,
+fee products, liquidation keys) are computed in `i128` and checked on the way back; the rest
+are plain `i64`, kept in range by RISK.md 2.4 and checked for overflow (first update below).
+The types were aliases of `i64` until 2026-10-01; since then they are newtypes over `i64`,
+and lots × ticks = micros is the one product between two units (the newtypes update below).
+The identifiers became types of their own the same day (the last update below).
 
 **Context:** The engine must be exact and deterministic: conservation checks compare sums
 to the last micro-dollar, and replay must reproduce every value bit for bit.
@@ -252,17 +256,122 @@ therefore always 10^-6 dollars, one micro. Example, SP500-USD: tick 0.1, lot 0.0
 one unit at 7,502.4 is 75,024 ticks × 100,000 lots = 7,502,400,000 micros = $7,502.40.
 That example is the unit test `types::tests::notional_is_price_times_qty_and_reports_overflow`.
 
-Aliases rather than newtypes: price and quantity arithmetic reads naturally, which matters
-because the code must be easy to read aloud. The cost is that the compiler won't catch a
-price used as a quantity; the equivalence and invariant tests are the safety net.
+Aliases rather than newtypes (the choice until 2026-10-01): price and quantity arithmetic
+reads naturally, which matters because the code must be easy to read aloud. The cost is that
+the compiler won't catch a price used as a quantity; the equivalence and invariant tests are
+the safety net.
 
 Rounding rules for margin and fees are decided in Milestone 2, where they first arise.
 
-**Trade-offs:** No compile-time unit safety. Markets whose tick × lot isn't one micro can't
-be represented without adding a scale factor.
+**Trade-offs:** While the types were aliases, no compile-time unit safety; since 2026-10-01
+the compiler keeps the three units apart, but not two values of one unit (a cost basis and
+a collateral amount are both `Micros`: `SlotMoney`'s job, below), and scaling by a rate is
+written on the bare numbers. Markets whose tick × lot isn't one micro can't be represented
+without adding a scale factor.
 
-**What would change it:** An instrument where tick × lot ≠ 1 micro (add a per-market scale),
-or a unit mix-up bug reaching a test failure (switch to newtypes).
+**What would change it:** An instrument where tick × lot ≠ 1 micro (add a per-market scale).
+(A unit mix-up reaching a test failure would have meant newtypes; they came first, on a
+review's advice, below.)
+
+**Update (2026-10-01): overflow checks in every build.** A review pointed out that most of
+the engine's products and sums are plain `i64` (`pos × mark`, `locked + pnl`, `locked +=
+amount`), safe only because RISK.md 2.4's size limits keep them in range, and that release
+builds had overflow checks off: had a limit ever been broken, a benchmark build would have
+wrapped silently where the tests (debug builds) panic. The engine crate now has
+`overflow-checks = true` in the release and bench profiles, so "never wraps" holds in every
+build. Measured with `risk_cost/engine` on the local Ryzen (noise between identical runs
+about ±8%): 252, 286, 293 and 294 ns per command without the checks, 292, 278 and 266 ns
+with them; no difference that this machine can resolve. The same review reopened the
+aliases-or-newtypes choice; see the next updates.
+
+**Update (2026-10-01): slot money and order sequence numbers.** The same review found two
+mix-ups that newtypes for `Price`, `Qty` and `Micros` could not catch. The first is in the
+money functions, which took a slot's values one by one: `equity` a cost basis and a
+collateral amount, `release_amount` three `Micros`, `top_up_needed` two, so swapping two of
+them compiled. Cost basis and collateral are both `Micros`, and a type can't tell apart two
+values of the same unit, so the money functions now take the slot whole: `money::SlotMoney`
+holds a slot's position, cost basis and locked collateral, and unrealized PnL, equity, the
+liquidation check, the top-up and the release are its methods (`Slot::money()` builds one).
+The top-up and the release now compute the slot's equity themselves, at the mark they are
+given, instead of taking it as an argument; every caller had passed exactly that slot's
+equity at that same mark, so no value changes. The liquidation keys are `SlotMoney`
+methods too (`liquidation_key`, `liquidation_key_by_search`), and `apply_change` takes the
+position and the change each whole, as a `money::Holding` (a quantity and its cost), and
+reads `position.apply_change(change)`: neither its two `Qty` nor its two `Micros` can be
+swapped on their own any more (two whole `Holding`s still could). The second is order ids:
+`order_id(account, seq)` took two `u32`s that are different kinds of number, so the
+sequence number gets its own type, `types::OrderSeq`, a `u32` newtype whose `Debug` and
+`Display` print the bare number: `order_id` takes one, and `sequence_of` returns one, so an
+account can't be passed where the sequence number goes. Evidence: the four reference
+journals recorded before the change replay with identical events and state, and the unit
+tests check the same worked numbers. The liquidation keys and `Holding` came last, after
+the newtypes below; the same four journals replay identical after them too.
+
+**Update (2026-10-01): newtypes.** The same review's main point: with `Price`, `Qty` and
+`Micros` all aliases of `i64`, a price passed as a quantity, or an amount of money added to
+a price, compiled. Giving each unit a type of its own is also the usual practice in Rust, so
+they are now `#[repr(transparent)]` newtypes over `i64` with a private field
+(`engine/src/types.rs`): `Price::new(ticks)` and `.ticks()`, `Qty::new(lots)` and `.lots()`,
+`Micros::new(micros)` and `.micros()`, and no implicit conversion. Values of one unit
+compare, add and subtract (a difference of two prices is a number of ticks, so a `Price`),
+and `Qty` and `Micros` also negate, take `abs()` and sum. The one operation between two
+units is this decision's identity: `qty * price` (or `price * qty`) is `Micros`, a plain
+`i64` product that panics on overflow (first update). Everything else goes through the bare
+numbers, written out with a comment where it happens: scaling by a rate in ppm (the band's
+edges), dividing by a leverage (the margins), micros over ticks for lots (`max_qty`, and a
+flow's lots for a notional), and the widenings to `i128` (`i128::from(price)`). A type can't
+tell apart two values of the same unit, so swapping a cost basis and a collateral amount is
+still `SlotMoney`'s to prevent (previous update), not the types'. Outside the engine:
+`Debug` and `Display` print the bare number, as an `i64` does, so every report, log and
+snapshot reads byte for byte as before; `repr(transparent)` keeps the records' layout, and
+the codecs read and write the same words (`.ticks()` out, `::new` in). The Polymarket
+flow's calibrated table is generated by `tools/calibrate/rust.py` as bare integer literals
+and checked byte for byte, so its fields stay `i64` ticks and micros; the flow gives each
+its unit where it reads it. In that flow a count of real ticks (a spread, a gap) is now a
+bare `i64` and a price a `Price`, two things the aliases had let mix. Unit arithmetic in
+the other crates now goes through the engine's operators, so it panics on overflow there
+too rather than wrapping. Converting every crate found no unit bug: one test added a price
+to an amount of money, right only through the identity; it now reads `lots(1) * mark`.
+Evidence: the four reference journals replay with identical events and state, a fresh
+smoke run replays identically and its audit has no failure, and every test passes. Cost,
+`risk_cost/engine` on the local Ryzen: 296, 254 and 279 ns per command with the newtypes,
+against 252 to 294 before and 269 and 320 for the aliases measured in between on the same
+day; no difference this machine can resolve.
+
+**Update (2026-10-01): identifier types.** The last aliases were the identifiers, and each
+had the width of other numbers: `MarketId` was a `u16` like `max_leverage`, `AccountId` a
+`u32` like a sequence number or a count, `OrderId` a `u64` like a nonce or a timestamp. They
+are now `#[repr(transparent)]` newtypes with a private field, as `OrderSeq` already was
+(`engine/src/types.rs`): `::new(n)` names one and `.get()` reads the number back; `Debug` and
+`Display` print the bare number, and equality, ordering and `Hash` are the integer's. An id
+is a name, not a number, so there is no arithmetic and no conversion. `order_id`,
+`account_of` and `sequence_of` build and read the bits through `.get()`. Two helpers beyond
+that: `AccountId::MAX`, the id the insurance fund and a rejected operator command carry
+(RISK.md 3.4), and `.index()` on a market or account id, its position in a list kept by id
+(the engine's markets, a generator's per-account counters), which names the one conversion
+to `usize` instead of a cast at every such list. Where an id meets bytes (the CMD40 and
+EVT56 codecs, the meta word, the signed message and the EIP-712 encoding, `keys.txt`, the
+salt table's hash) the code reads `.get()` and writes `::new` explicitly, so every byte is
+as before. `MarketId` and `AccountId` keep `Default`, because the salt table's slots and a
+report's per-market counts derive it. The generated Polymarket table writes its market ids
+as bare literals, so `profile::Market::id` is now a `u16`, and `Market::market_id` makes it
+a `MarketId` where the flow reads it. The stricter types found no id bug, but four places
+where an alias had let another kind of number pass: the reference book's `cancelled` took
+its market as a bare `u16`; counts were typed as ids (`MarketFlowConfig::markets`, loadgen's
+`FlowConfig::accounts`, a pipeline test's market and account counts, and an engine
+regression test's `TRADERS_PER_SIDE`), and are now plain `u16` and `u32`; the flows and the
+risk benchmark made account ids by adding to a base id (`TAKER_BASE + i`), so the bases are
+now account numbers (`u32`) and the ids are made with `AccountId::new`, the same ids as
+before; and the generators that derive something from an id's number (a market's class is
+`id mod 3`, its start price and random streams come from its id, a gateway is
+`account mod N`) now say so with `.get()`. Noted, not changed: a `Reject`'s order id is 0
+for a command that names no order (the engine's `NO_ORDER`), which is also the id of
+account 0's order 0. Evidence: the four reference journals replay with identical events and
+state; a fresh M3 smoke run and a fresh Polymarket-shaped smoke run replay identically, pass
+the audit with no failure and write `keys.txt` byte for byte as the runs before the change;
+every test passes, among them one that checks that an id prints, hashes and sorts as its
+integer. Cost, `risk_cost/engine` on the local Ryzen: 268, 258 and 271 ns per command,
+inside the 252 to 320 measured for the updates above.
 
 ---
 

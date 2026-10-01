@@ -442,6 +442,7 @@ mod tests {
     use crate::records::{InjectionMode, Meta, SIGNATURE_WORDS, Source};
     use engine::command::{Command, SetMark};
     use engine::engine::EngineOptions;
+    use engine::types::{AccountId, MarketId, Price};
 
     const SEGMENT: u64 = 4_096;
     const ANCHOR: u64 = 1_790_000_000_000_000_000;
@@ -454,13 +455,16 @@ mod tests {
     /// Record `seq`: kind 1 (152 bytes) when `signed`, else an operator mark (80 bytes),
     /// sequenced at run time `seq * 1_000`.
     fn record(seq: u64, signed: bool) -> Vec<u64> {
-        let meta =
-            if signed { Meta { source: Source::SignedClient, lane: 0, account: 9 } } else { Meta::OPERATOR };
-        let command = if signed {
-            let id = engine::types::order_id(9, seq as u32);
-            Command::CancelOrder(engine::command::CancelOrder { order_id: id, market: 1 })
+        let meta = if signed {
+            Meta { source: Source::SignedClient, lane: 0, account: AccountId::new(9) }
         } else {
-            Command::SetMark(SetMark { price: seq as i64, market: 1 })
+            Meta::OPERATOR
+        };
+        let command = if signed {
+            let id = engine::types::order_id(AccountId::new(9), engine::types::OrderSeq::new(seq as u32));
+            Command::CancelOrder(engine::command::CancelOrder { order_id: id, market: MarketId::new(1) })
+        } else {
+            Command::SetMark(SetMark { price: Price::new(seq as i64), market: MarketId::new(1) })
         };
         let record = JournalRecord {
             seq,

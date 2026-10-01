@@ -253,7 +253,7 @@ mod tests {
     //! so it is tested in `gateway/tests/signed_pipeline.rs`, not in this binary.
     use super::*;
     use crate::salts::SaltTable;
-    use crate::test_support::{cancel, message, message_eip712, place, registry, signing_key};
+    use crate::test_support::{acct, cancel, message, message_eip712, place, registry, signing_key};
     use crate::wire::MESSAGE_BYTES;
     use engine::types::AccountId;
     use pipeline::codec::encode_command;
@@ -273,7 +273,7 @@ mod tests {
             1,
             2,
             DEPLOYMENT,
-            &registry(1, DEPLOYMENT, [1, 3, 5, 7]),
+            &registry(1, DEPLOYMENT, [1, 3, 5, 7].map(acct)),
             &NonceTable::new(),
             ANCHOR,
         );
@@ -329,21 +329,26 @@ mod tests {
     #[test]
     fn accepted_messages_become_lane_records_and_rejects_are_counted() {
         let (gateway, config) = setup(0..u64::MAX);
-        let expired = message(&signing_key(1, 3), DEPLOYMENT, 3, 1, ANCHOR - 1, &place(3, 1));
+        let expired =
+            message(&signing_key(1, acct(3)), DEPLOYMENT, acct(3), 1, ANCHOR - 1, &place(acct(3), 1));
         let messages = [
-            signed(1, 1, &place(1, 1)),
-            signed(1, 1, &place(1, 2)), // StaleNonce: a replayed nonce
-            signed(2, 1, &place(2, 1)), // WrongGateway: account 2 is gateway 0's
-            expired,                    // Expired: the clock is past it from the start
-            signed(3, 7, &cancel(3, 9)),
-            signed(1, 2, &cancel(1, 1)),
+            signed(acct(1), 1, &place(acct(1), 1)),
+            signed(acct(1), 1, &place(acct(1), 2)), // StaleNonce: a replayed nonce
+            signed(acct(2), 1, &place(acct(2), 1)), // WrongGateway: account 2 is gateway 0's
+            expired,                                // Expired: the clock is past it from the start
+            signed(acct(3), 7, &cancel(acct(3), 9)),
+            signed(acct(1), 2, &cancel(acct(1), 1)),
         ];
         let (lane_in, mut lane) = channel::<3>(LANE_CAPACITY);
         let stats = run_gateway(gateway, ingress_with(&messages), lane_in, &config);
 
         let records = drain(&mut lane);
         assert_eq!(records.len(), 3);
-        let expected = [(1, 1, place(1, 1), 0), (3, 7, cancel(3, 9), 4), (1, 2, cancel(1, 1), 5)];
+        let expected = [
+            (acct(1), 1, place(acct(1), 1), 0),
+            (acct(3), 7, cancel(acct(3), 9), 4),
+            (acct(1), 2, cancel(acct(1), 1), 5),
+        ];
         for (record, (account, nonce, command, i)) in records.iter().zip(expected) {
             assert_eq!(record.meta, Meta { source: Source::SignedClient, lane: 1, account });
             assert_eq!(record.nonce, nonce);
@@ -370,7 +375,7 @@ mod tests {
         // Messages are scheduled at 1,000, 2,000, 3,000 and 4,000; the window is
         // [2,000, 4,000).
         let (gateway, config) = setup(2_000..4_000);
-        let stale = signed(1, 1, &place(1, 1));
+        let stale = signed(acct(1), 1, &place(acct(1), 1));
         let messages = [stale, stale, stale, stale]; // the first is accepted, the rest stale
         let (lane_in, mut lane) = channel::<3>(LANE_CAPACITY);
         let stats = run_gateway(gateway, ingress_with(&messages), lane_in, &config);
@@ -385,8 +390,8 @@ mod tests {
         // Nobody reads the 128-slot lane while the gateway runs, so its free slots only
         // shrink: places are taken while more than 64 are free, cancels until none is.
         let (gateway, config) = setup(0..u64::MAX);
-        let places = (1..=70).map(|n| signed(5, n, &place(5, n as u32)));
-        let cancels = (71..=140).map(|n| signed(5, n, &cancel(5, n as u32 - 70)));
+        let places = (1..=70).map(|n| signed(acct(5), n, &place(acct(5), n as u32)));
+        let cancels = (71..=140).map(|n| signed(acct(5), n, &cancel(acct(5), n as u32 - 70)));
         let messages: Vec<_> = places.chain(cancels).collect();
         let (lane_in, mut lane) = channel::<3>(128);
         let stats = run_gateway(gateway, ingress_with(&messages), lane_in, &config);
@@ -409,7 +414,7 @@ mod tests {
         // plus the 64 free slots a place needs (check 10), so a reader the OS pauses can't
         // turn a place into `Busy`: with 128 it could, and did with libsecp256k1 (5.7).
         let (gateway, config) = setup(0..u64::MAX);
-        let messages: Vec<_> = (1..=300).map(|n| signed(7, n, &place(7, n as u32))).collect();
+        let messages: Vec<_> = (1..=300).map(|n| signed(acct(7), n, &place(acct(7), n as u32))).collect();
         let (mut sender, ingress) = channel::<3>(8);
         let (lane_in, mut lane) = channel::<3>(512);
         let records = std::thread::scope(|scope| {
@@ -438,25 +443,26 @@ mod tests {
     fn eip712_messages_become_lane_records_with_their_salt_and_timestamp() {
         // The EIP-712 scheme (D-033) through the same loop: the salt and the timestamp travel
         // in the record's nonce and expiry words, and the rejects are counted by reason.
-        let keys = registry(1, DEPLOYMENT, [1, 3]);
+        let keys = registry(1, DEPLOYMENT, [1, 3].map(acct));
         let gateway = Gateway::new_eip712(1, 2, DEPLOYMENT, &keys, SaltTable::new(16, 1), ANCHOR);
         let config = config(0..u64::MAX);
         let now_ms = ANCHOR / 1_000_000; // the clock starts there, and a test takes far less than 5 minutes
         let signed = |account, key_of, salt, ts_ms, command: &engine::command::Command| {
-            message_eip712(&signing_key(1, key_of), DEPLOYMENT, account, salt, ts_ms, command)
+            message_eip712(&signing_key(1, acct(key_of)), DEPLOYMENT, account, salt, ts_ms, command)
         };
         let messages = [
-            signed(1, 1, 7, now_ms, &place(1, 1)),
-            signed(1, 1, 7, now_ms, &place(1, 1)), // ReusedRequest
-            signed(1, 3, 8, now_ms, &place(1, 2)), // WrongSigner: account 3's key
-            signed(3, 3, 9, now_ms - 300_001, &cancel(3, 1)), // StaleTimestamp
-            signed(3, 3, 9, now_ms + 1, &cancel(3, 1)),
+            signed(acct(1), 1, 7, now_ms, &place(acct(1), 1)),
+            signed(acct(1), 1, 7, now_ms, &place(acct(1), 1)), // ReusedRequest
+            signed(acct(1), 3, 8, now_ms, &place(acct(1), 2)), // WrongSigner: account 3's key
+            signed(acct(3), 3, 9, now_ms - 300_001, &cancel(acct(3), 1)), // StaleTimestamp
+            signed(acct(3), 3, 9, now_ms + 1, &cancel(acct(3), 1)),
         ];
         let (lane_in, mut lane) = channel::<3>(LANE_CAPACITY);
         let stats = run_gateway(gateway, ingress_with(&messages), lane_in, &config);
 
         let records = drain(&mut lane);
-        let expected = [(1, 7, now_ms, place(1, 1), 0), (3, 9, now_ms + 1, cancel(3, 1), 4)];
+        let expected =
+            [(acct(1), 7, now_ms, place(acct(1), 1), 0), (acct(3), 9, now_ms + 1, cancel(acct(3), 1), 4)];
         assert_eq!(records.len(), expected.len());
         for (record, (account, salt, ts_ms, command, i)) in records.iter().zip(expected) {
             assert_eq!(record.meta, Meta { source: Source::SignedClient, lane: 1, account });

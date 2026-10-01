@@ -1929,9 +1929,9 @@ leave it out (13.2).
 - **Commit and profile** are set at build time (`option_env!("PERPS_GIT_COMMIT")`, as the
   recorder build already does; release or not from `cfg!(debug_assertions)`). Recovery and
   replay print them and warn when they differ from the running binary's. The profile is
-  recorded, not enforced: debug builds check integer overflow and release builds don't,
-  but D-020's limits rule overflow out, so a replay that panics in one profile and not in
-  the other has found an engine bug, which is what we would want to know.
+  recorded, not enforced. The engine checks integer overflow in every profile (D-004's
+  2026-10-01 update), and D-020's limits rule overflow out, so an overflow panic in any
+  build has found an engine bug, which is what we would want to know.
 - **The header holds the hash seed, a secret in production** (D-011): journal files must
   be protected like the seed itself. In benchmark runs the seed is derived from the run's
   seed and is not secret.

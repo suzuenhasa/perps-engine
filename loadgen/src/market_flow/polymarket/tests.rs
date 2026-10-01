@@ -11,14 +11,29 @@ use std::sync::OnceLock;
 
 use super::*;
 use crate::market_flow::profile::{BookClass, LeverageClass, Spread};
-use crate::market_flow::{ClientItem, FlowPhase, MarketFlowConfig};
+use crate::market_flow::{ClientItem, DOLLAR, FlowPhase, MarketFlowConfig};
 use engine::book::Book;
 use engine::command::{CancelOrder, ModifyOrder, PlaceOrder};
 use engine::engine::Engine;
 use engine::event::{Event as EngineEvent, RejectReason};
 use engine::mode::Fast;
 use engine::money::{band_edges, band_rule_1_holds, band_rule_2_holds};
-use engine::types::{OrderId, TimeInForce, account_of, order_id, sequence_of};
+use engine::types::{OrderId, OrderSeq, Qty, TimeInForce, account_of, order_id, sequence_of};
+
+/// A price of `ticks` ticks.
+fn px(ticks: i64) -> Price {
+    Price::new(ticks)
+}
+
+/// A quantity of `lots` lots.
+fn lots(lots: i64) -> Qty {
+    Qty::new(lots)
+}
+
+/// Account number `n`.
+fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
 
 // ---------------------------------------------------------------------------------------
 // The generator's view of the books, rebuilt from a plan.
@@ -29,7 +44,7 @@ struct Resting {
     market: MarketId,
     side: Side,
     price: Price,
-    size: i64,
+    size: Qty,
 }
 
 /// What the timed flow's items and books looked like.
@@ -120,7 +135,7 @@ impl View {
             view.timed = phase == FlowPhase::Timed;
             if view.timed {
                 for market in plan.config.markets() {
-                    view.check_full(market.id);
+                    view.check_full(market.market_id());
                 }
             }
             for item in plan.phase(phase) {
@@ -148,7 +163,7 @@ impl View {
     fn rank(&self, market: MarketId, side: Side, price: Price) -> usize {
         let book = &self.books[&market][side_index(side)];
         match side {
-            Side::Buy => book.range(price + 1..).count(),
+            Side::Buy => book.range(price + Price::ONE_TICK..).count(),
             Side::Sell => book.range(..price).count(),
         }
     }
@@ -205,7 +220,9 @@ impl View {
         if self.timed {
             self.check_full(market);
             let class = spec(market).book.class as usize;
+            // Spreads and distances in hundredths of a bps, on the bare numbers of ticks.
             let (bid, ask) = self.best(market);
+            let (bid, ask) = (bid.ticks(), ask.ticks());
             self.shape.spreads[class].push((ask - bid) * 2 * 1_000_000 / (ask + bid));
             let [bids, asks] = &self.books[&market];
             // Each side best first.
@@ -214,20 +231,21 @@ impl View {
             for (book, prices) in self.books[&market].iter().zip(&sides) {
                 for (rank, price) in prices.iter().enumerate() {
                     let quote = self.orders[&book[price]];
-                    let usd = quote.size * quote.price / DOLLAR;
+                    let usd = (quote.size * quote.price).micros() / DOLLAR.micros();
                     self.shape.depth[class].push(usd);
                     self.shape.level_depth[class][rank].push(usd);
                 }
                 // Gaps in real ticks, as the calibration counts them (scan.py).
                 for (rank, pair) in prices.windows(2).enumerate() {
-                    let ticks = (pair[1] - pair[0]).abs() / real_tick(pair[0].min(pair[1]));
+                    let ticks = (pair[1] - pair[0]).ticks().abs() / real_tick(pair[0].min(pair[1])).ticks();
                     let counts = &mut self.shape.gaps[class][gap_bucket(rank)];
                     counts[0] += 1;
                     counts[1] += u64::from(ticks == 1);
                     counts[2] += u64::from(ticks > 10);
                 }
                 for (i, level) in [1, 5, 10, 20].into_iter().enumerate() {
-                    let distance = (prices[level - 1] * 2 - (bid + ask)).abs() * 1_000_000 / (bid + ask);
+                    let distance =
+                        (prices[level - 1].ticks() * 2 - (bid + ask)).abs() * 1_000_000 / (bid + ask);
                     self.shape.distances[class][i].push(distance);
                 }
             }
@@ -248,18 +266,17 @@ impl View {
     fn place(&mut self, account: AccountId, cohort: Cohort, place: PlaceOrder) {
         assert_eq!(account_of(place.order_id), account, "{place:?}");
         let sequence = self.last_sequence.entry(account).or_default();
-        assert_eq!(sequence_of(place.order_id), *sequence + 1, "order sequences 1, 2, 3, …: {place:?}");
+        assert_eq!(sequence_of(place.order_id).get(), *sequence + 1, "order sequences 1, 2, 3, …: {place:?}");
         *sequence += 1;
         self.check_price(place.market, place.price, &place);
         let mark = self.marks[&place.market];
         if place.tif == TimeInForce::Ioc {
             // Takers and cohorts: worth $10 or more at the mark, at most the cap and a lot.
             assert!(!place.post_only && !matches!(cohort, Cohort::Maker { .. }), "{place:?}");
+            // A lot at the mark is worth `mark` micros (D-004).
             let notional = place.qty * mark;
-            assert!(
-                notional >= 10 * DOLLAR && notional < spec(place.market).max_notional + mark,
-                "{place:?}"
-            );
+            let cap = Micros::new(spec(place.market).max_notional);
+            assert!(notional >= dollars(10) && notional < cap + lots(1) * mark, "{place:?}");
             match cohort {
                 Cohort::Taker => self.shape.takers += u64::from(self.timed),
                 _ => self.shape.cohort_iocs += u64::from(self.timed),
@@ -267,7 +284,7 @@ impl View {
             return;
         }
         assert!(place.post_only && matches!(cohort, Cohort::Maker { .. }), "{place:?}");
-        assert!(place.qty * place.price >= 10 * DOLLAR, "{place:?} under $10");
+        assert!(place.qty * place.price >= dollars(10), "{place:?} under $10");
         // The generator's own book is never crossed, so no post-only quote is rejected for it.
         if self.books.get(&place.market).is_some_and(|[bids, asks]| !bids.is_empty() && !asks.is_empty()) {
             let (bid, ask) = self.best(place.market);
@@ -295,7 +312,7 @@ impl View {
         assert_eq!((account_of(modify.order_id), resting.market), (account, modify.market), "{modify:?}");
         assert_eq!(modify.new_price, resting.price, "a resize keeps its price: {modify:?}");
         self.check_price(modify.market, modify.new_price, &modify);
-        assert!(modify.new_size * modify.new_price >= 10 * DOLLAR, "{modify:?} under $10");
+        assert!(modify.new_size * modify.new_price >= dollars(10), "{modify:?} under $10");
         if self.timed {
             match modify.new_size.cmp(&resting.size) {
                 std::cmp::Ordering::Greater => self.shape.ups += 1,
@@ -397,8 +414,11 @@ fn every_market_has_its_real_parameters_and_passes_both_band_rules() {
             band_rule_2_holds(params.min_price, params.max_leverage, params.price_band_ppm, fee),
             "{params:?}"
         );
-        assert_eq!((params.min_price, params.max_price), (market.start_price / 2, 2 * market.start_price));
-        assert_eq!((params.market, params.max_leverage), (market.id, market.max_leverage));
+        assert_eq!(
+            (params.min_price, params.max_price),
+            (px(market.start_price / 2), px(2 * market.start_price))
+        );
+        assert_eq!((params.market, params.max_leverage), (market.market_id(), market.max_leverage));
         // The fair value's bounds keep the band's edges inside the range.
         let state = MarketState::new(1, market);
         for fair in [state.fair_low, state.fair_high] {
@@ -406,7 +426,7 @@ fn every_market_has_its_real_parameters_and_passes_both_band_rules() {
             assert!(params.min_price <= edges.lower && edges.upper <= params.max_price, "{}", market.symbol);
             assert!(on_grid(fair), "{}", market.symbol);
         }
-        level_bytes += 8 * (params.max_price - params.min_price + 1);
+        level_bytes += 8 * ((params.max_price - params.min_price).ticks() + 1);
     }
     // The module docs: 85.6 MB of levels for the 88 books.
     assert_eq!(level_bytes / 100_000, 856, "{level_bytes} bytes of levels");
@@ -420,12 +440,15 @@ fn every_market_has_its_real_parameters_and_passes_both_band_rules() {
 
 #[test]
 fn the_real_grid_has_five_significant_figures() {
-    assert_eq!([1, 99_999, 100_000, 999_999, 1_000_000, 1_509_400].map(real_tick), [1, 1, 10, 10, 100, 100]);
-    assert_eq!((snap_down(123_456), snap_up(123_456), snap_up(123_450)), (123_450, 123_460, 123_450));
+    let ticks = [1, 99_999, 100_000, 999_999, 1_000_000, 1_509_400].map(|price| real_tick(px(price)).ticks());
+    assert_eq!(ticks, [1, 1, 10, 10, 100, 100]);
+    let snapped = [snap_down(px(123_456)), snap_up(px(123_456)), snap_up(px(123_450))];
+    assert_eq!(snapped, [123_450, 123_460, 123_450].map(px));
     // Rounding up across a power of ten lands on it, which is on every grid.
-    assert_eq!((snap_up(99_999), snap_up(999_995), snap_down(1_000_050)), (99_999, 1_000_000, 1_000_000));
-    assert_eq!(snap_up(9_999_991), 10_000_000);
-    assert!(on_grid(99_999) && on_grid(100_010) && !on_grid(100_001));
+    let snapped = [snap_up(px(99_999)), snap_up(px(999_995)), snap_down(px(1_000_050))];
+    assert_eq!(snapped, [99_999, 1_000_000, 1_000_000].map(px));
+    assert_eq!(snap_up(px(9_999_991)), px(10_000_000));
+    assert!(on_grid(px(99_999)) && on_grid(px(100_010)) && !on_grid(px(100_001)));
 }
 
 #[test]
@@ -442,28 +465,37 @@ fn setup_phases_hold_what_the_module_docs_list_in_its_order() {
     assert!(plan.setup_a.iter().all(|item| !item.is_client()));
     let sp500 = &POLYMARKET.markets[0];
     assert_eq!(*plan.setup_a[0].command(), Command::SetMarketParams(market_params(sp500)));
-    let first_tier = SetRiskTier { lower_bound: 0, market: 1, max_leverage: 50, index: 0, count: 8 };
+    let first_tier = SetRiskTier {
+        lower_bound: Micros::ZERO,
+        market: MarketId::new(1),
+        max_leverage: 50,
+        index: 0,
+        count: 8,
+    };
     assert_eq!(*plan.setup_a[1].command(), Command::SetRiskTier(first_tier));
-    assert_eq!(*plan.setup_a[9].command(), Command::SetMark(SetMark { price: 76_822, market: 1 }));
+    assert_eq!(
+        *plan.setup_a[9].command(),
+        Command::SetMark(SetMark { price: px(76_822), market: MarketId::new(1) })
+    );
     let fund = 88 * 2 + 453;
     assert_eq!(
         *plan.setup_a[fund].command(),
-        Command::Deposit(Deposit { amount: 1_000 * DOLLAR, account: FUND })
+        Command::Deposit(Deposit { amount: dollars(1_000), account: FUND })
     );
-    let maker = Command::Deposit(Deposit { amount: 1_000_000_000 * DOLLAR, account: 1 });
+    let maker = Command::Deposit(Deposit { amount: dollars(1_000_000_000), account: acct(1) });
     assert_eq!(*plan.setup_a[fund + 1].command(), maker);
     // Maker 1's first market (by id) is its group's lightest-numbered one, at 5x.
     let market_makers = config.market_makers();
     let first_market = market_makers.iter().position(|&(first, _)| first == 1).expect("maker 1 quotes");
     let leverage = fund + 1 + 1_236;
     let expected = SetLeverage {
-        account: 1,
-        market: POLYMARKET.markets[first_market].id,
+        account: acct(1),
+        market: POLYMARKET.markets[first_market].market_id(),
         leverage: 5.min(POLYMARKET.markets[first_market].max_leverage),
     };
     assert_eq!(*plan.setup_a[leverage].command(), Command::SetLeverage(expected));
     // The last: the high-leverage short of the last market (NCLD-USD, id 90, 10x).
-    let last = SetLeverage { account: 5_176, market: 90, leverage: 10 };
+    let last = SetLeverage { account: acct(5_176), market: MarketId::new(90), leverage: 10 };
     assert_eq!(*plan.setup_a.last().expect("items").command(), Command::SetLeverage(last));
 
     // B1: per market its 20 bids, then its 20 asks, post-only, around the start price.
@@ -476,26 +508,25 @@ fn setup_phases_hold_what_the_module_docs_list_in_its_order() {
             })
             .collect();
         let (bids, asks) = quotes.split_at(20);
-        assert!(quotes.iter().all(|q| q.market == market.id && q.post_only && q.tif == TimeInForce::Gtc));
+        assert!(
+            quotes.iter().all(|q| q.market == market.market_id() && q.post_only && q.tif == TimeInForce::Gtc)
+        );
         assert!(bids.iter().all(|q| q.side == Side::Buy) && asks.iter().all(|q| q.side == Side::Sell));
         // The best first: each quote a gap behind the one before, except where the gap would
         // pass the reach (half the band): then the deepest free price within it.
-        let reach = market.start_price * i64::from(band_ppm(market.max_leverage)) / 2_000_000;
-        assert!(
-            bids[0].price <= market.start_price && asks[0].price > market.start_price,
-            "{}",
-            market.symbol
-        );
-        assert!(bids[1..].iter().all(|q| q.price < bids[0].price && market.start_price - q.price <= reach));
-        assert!(asks[1..].iter().all(|q| q.price > asks[0].price && q.price - market.start_price <= reach));
+        let start = px(market.start_price);
+        let reach = px(market.start_price * i64::from(band_ppm(market.max_leverage)) / 2_000_000);
+        assert!(bids[0].price <= start && asks[0].price > start, "{}", market.symbol);
+        assert!(bids[1..].iter().all(|q| q.price < bids[0].price && start - q.price <= reach));
+        assert!(asks[1..].iter().all(|q| q.price > asks[0].price && q.price - start <= reach));
         // Market m's group of 3 makers: the r-th bid is maker (r + m) mod 3's, the r-th ask
         // maker (r + 1 + m) mod 3's.
         let (first, count) = market_makers[m];
         assert_eq!(count, 3);
         for (rank, (bid, ask)) in bids.iter().zip(asks).enumerate() {
             let turn = rank as u32 + m as u32;
-            assert_eq!(account_of(bid.order_id), first + turn % 3);
-            assert_eq!(account_of(ask.order_id), first + (turn + 1) % 3);
+            assert_eq!(account_of(bid.order_id), acct(first + turn % 3));
+            assert_eq!(account_of(ask.order_id), acct(first + (turn + 1) % 3));
         }
     }
     // B2: three IOCs per high-leverage account, in id order, at the band's edge of the start.
@@ -506,19 +537,29 @@ fn setup_phases_hold_what_the_module_docs_list_in_its_order() {
         let spec = &POLYMARKET.markets[market];
         assert_eq!(
             (client.account, place.market, place.side, place.tif),
-            (account, spec.id, side, TimeInForce::Ioc)
+            (account, spec.market_id(), side, TimeInForce::Ioc)
         );
-        let edges = band_edges(spec.start_price, band_ppm(spec.max_leverage));
+        let edges = band_edges(px(spec.start_price), band_ppm(spec.max_leverage));
         let edge = if side == Side::Buy { snap_down(edges.upper) } else { snap_up(edges.lower) };
         assert_eq!(place.price, edge);
-        assert_eq!(place.qty, engine::money::ceil_div(2_000 * DOLLAR, spec.start_price));
+        // Micros over ticks is lots (D-004).
+        assert_eq!(place.qty, lots(engine::money::ceil_div(dollars(2_000).micros(), spec.start_price)));
     }
     // SP500's high-leverage pair: 5,001 long, 5,002 short.
-    assert_eq!(config.cohort_of(5_001), Some(Cohort::HighLeverage { market: 1, side: Side::Buy }));
-    assert_eq!(config.cohort_of(5_002), Some(Cohort::HighLeverage { market: 1, side: Side::Sell }));
-    assert_eq!((config.cohort_of(60), config.cohort_of(61)), (Some(Cohort::Maker { index: 59 }), None));
-    assert_eq!((config.cohort_of(2_000), config.cohort_of(2_001)), (Some(Cohort::Taker), None));
-    assert_eq!((config.cohort_of(5_177), config.cohort_of(CASCADE_BASE)), (None, None));
+    assert_eq!(
+        config.cohort_of(acct(5_001)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Buy })
+    );
+    assert_eq!(
+        config.cohort_of(acct(5_002)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Sell })
+    );
+    assert_eq!(
+        (config.cohort_of(acct(60)), config.cohort_of(acct(61))),
+        (Some(Cohort::Maker { index: 59 }), None)
+    );
+    assert_eq!((config.cohort_of(acct(2_000)), config.cohort_of(acct(2_001))), (Some(Cohort::Taker), None));
+    assert_eq!((config.cohort_of(acct(5_177)), config.cohort_of(acct(CASCADE_BASE))), (None, None));
     assert_eq!(config.client_accounts().len(), 60 + 1_000 + 176);
 }
 
@@ -580,28 +621,33 @@ fn the_first_items_and_the_counts_after_1m_items_are_pinned() {
     let first: Vec<Item> = flow.by_ref().take(3).collect();
     // A resize of maker 16's 22nd order (AMD-USD), then a re-price of maker 12's 62nd
     // (MRVL-USD): its cancel, and its new quote.
-    let modify = ModifyOrder { order_id: order_id(16, 22), new_price: 60_790, new_size: 4_261, market: 22 };
+    let modify = ModifyOrder {
+        order_id: order_id(acct(16), OrderSeq::new(22)),
+        new_price: px(60_790),
+        new_size: lots(4_261),
+        market: MarketId::new(22),
+    };
     assert_eq!(
         first[0],
-        Item::Client(ClientItem { account: 16, nonce: 55, command: Command::ModifyOrder(modify) })
+        Item::Client(ClientItem { account: acct(16), nonce: 55, command: Command::ModifyOrder(modify) })
     );
-    let cancel = CancelOrder { order_id: order_id(12, 62), market: 86 };
+    let cancel = CancelOrder { order_id: order_id(acct(12), OrderSeq::new(62)), market: MarketId::new(86) };
     assert_eq!(
         first[1],
-        Item::Client(ClientItem { account: 12, nonce: 68, command: Command::CancelOrder(cancel) })
+        Item::Client(ClientItem { account: acct(12), nonce: 68, command: Command::CancelOrder(cancel) })
     );
     let place = PlaceOrder {
-        order_id: order_id(12, 68),
-        price: 26_262,
-        qty: 6_732_428,
-        market: 86,
+        order_id: order_id(acct(12), OrderSeq::new(68)),
+        price: px(26_262),
+        qty: lots(6_732_428),
+        market: MarketId::new(86),
         side: Side::Sell,
         tif: TimeInForce::Gtc,
         post_only: true,
     };
     assert_eq!(
         first[2],
-        Item::Client(ClientItem { account: 12, nonce: 69, command: Command::PlaceOrder(place) })
+        Item::Client(ClientItem { account: acct(12), nonce: 69, command: Command::PlaceOrder(place) })
     );
 
     // IOCs, quotes, cancels, modifies and marks over the first 1,000,000 items.
@@ -620,10 +666,10 @@ fn the_first_items_and_the_counts_after_1m_items_are_pinned() {
         last = item;
     }
     assert_eq!(counts, [661, 364_186, 364_187, 266_672, 4_294]);
-    let cancel = CancelOrder { order_id: order_id(7, 5_576), market: 55 };
+    let cancel = CancelOrder { order_id: order_id(acct(7), OrderSeq::new(5_576)), market: MarketId::new(55) };
     assert_eq!(
         last,
-        Item::Client(ClientItem { account: 7, nonce: 15_241, command: Command::CancelOrder(cancel) })
+        Item::Client(ClientItem { account: acct(7), nonce: 15_241, command: Command::CancelOrder(cancel) })
     );
     assert_eq!((flow.flow_ns(), flow.jumps().len()), (9_957_320_551, 0));
 }
@@ -685,7 +731,7 @@ fn every_setup_phase_is_accepted_by_the_engine_and_the_timed_flow_keeps_rejects_
         .markets
         .iter()
         .flat_map(|market| &market.slots)
-        .filter(|slot| slot.pos != 0)
+        .filter(|slot| slot.pos != Qty::ZERO)
         .count();
     assert!(positions > 176, "{positions} open positions");
     let timed = &plan.timed[..400_000];
@@ -980,7 +1026,7 @@ fn fair_values_move_as_the_recorded_marks_do() {
         per_class[class].0 += 1;
         if mark.price != before {
             per_class[class].1 += 1;
-            let bps = (mark.price - before) as f64 / before as f64 * 1e4;
+            let bps = (mark.price - before).ticks() as f64 / before.ticks() as f64 * 1e4;
             per_class[class].2 += (bps / (f64::from(market.move_rms_millibps) / 1e3)).powi(2);
         }
     }
@@ -1030,10 +1076,10 @@ fn every_jump_is_marked_at_once_and_requotes_its_market() {
     for jump in &plan.jumps {
         check_requote(&plan, jump);
         // 50 to 123 bps (the recorded sizes), to the grid.
-        let bps = (jump.to - jump.from).abs() as f64 / jump.from as f64 * 1e4;
+        let bps = (jump.to - jump.from).ticks().abs() as f64 / jump.from.ticks() as f64 * 1e4;
         assert!((49.5..124.0).contains(&bps), "{jump:?}: {bps:.1} bps");
         // Jumps land on whole seconds of their market's marks: every 5th tick.
-        let index = POLYMARKET.markets.iter().position(|m| m.id == jump.market).expect("a market");
+        let index = POLYMARKET.markets.iter().position(|m| m.market_id() == jump.market).expect("a market");
         let phase = index as u64 * 200_000_000 / 88;
         assert_eq!((jump.flow_ns - phase) % SECOND_NS, 0, "{jump:?}");
     }
@@ -1062,7 +1108,7 @@ fn shocks_move_many_markets_together_as_their_preset_says() {
             assert!((14..=88).contains(&moves.len()), "{} movers", moves.len());
             let ups = moves.iter().filter(|jump| jump.to > jump.from).count();
             for jump in moves {
-                let size = (jump.to - jump.from).abs() as f64 / jump.from as f64;
+                let size = (jump.to - jump.from).ticks().abs() as f64 / jump.from.ticks() as f64;
                 match shock.size {
                     ShockSize::Stress => {
                         assert!(ups == 0 || ups == moves.len(), "all one way");
@@ -1072,7 +1118,7 @@ fn shocks_move_many_markets_together_as_their_preset_says() {
                         let rms = f64::from(spec(jump.market).move_rms_millibps) / 1e7;
                         let sigmas = size / rms;
                         // 4 to 8 of its rms, to within a real tick.
-                        let tick = real_tick(jump.from) as f64 / jump.from as f64 / rms;
+                        let tick = real_tick(jump.from).ticks() as f64 / jump.from.ticks() as f64 / rms;
                         assert!(sigmas > 4.0 - tick && sigmas < 8.0 + tick, "{jump:?}: {sigmas:.2} sigmas");
                     }
                 }
@@ -1096,8 +1142,14 @@ fn the_stress_shock_liquidates_the_cascade_cohort_together() {
     };
     let plan = generate(&config, 200_000); // 10 s: 5 shocks
     assert_eq!(plan.setup_b2.len(), 176 * 3 + 88 * 8);
-    assert_eq!(config.cohort_of(CASCADE_BASE + 3), Some(Cohort::Cascade { market: 1, side: Side::Buy }));
-    assert_eq!(config.cohort_of(CASCADE_BASE + 4), Some(Cohort::Cascade { market: 1, side: Side::Sell }));
+    assert_eq!(
+        config.cohort_of(acct(CASCADE_BASE + 3)),
+        Some(Cohort::Cascade { market: MarketId::new(1), side: Side::Buy })
+    );
+    assert_eq!(
+        config.cohort_of(acct(CASCADE_BASE + 4)),
+        Some(Cohort::Cascade { market: MarketId::new(1), side: Side::Sell })
+    );
     let mut engine = engine_after_setup(&plan);
     let applied = apply(&mut engine, &plan.timed);
     // One shock's mark liquidates the wrong side of a market's cohort together: 4 accounts,
@@ -1145,7 +1197,7 @@ fn the_default_makers_spread_evenly_over_the_gateways() {
         let mut load = vec![0u64; gateways];
         for item in &plan.timed {
             if let Item::Client(client) = item {
-                load[(client.account % gateways as u32) as usize] += 1;
+                load[(client.account.get() % gateways as u32) as usize] += 1;
             }
         }
         let mean = load.iter().sum::<u64>() as f64 / gateways as f64;
@@ -1161,24 +1213,24 @@ fn makers_k_concentrates_market_making_in_k_accounts() {
     let view = View::of(&plan);
     let per_maker = &view.shape.per_maker;
     let total: u64 = per_maker.values().sum();
-    assert_eq!(per_maker.keys().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(per_maker.keys().copied().collect::<Vec<_>>(), [1, 2, 3].map(acct));
     assert!(per_maker.values().all(|&count| (30.0..37.0).contains(&percent(count, total))), "{per_maker:?}");
     assert_eq!(config.client_accounts().len(), 3 + 1_000 + 176);
     let leverage = plan
         .setup_a
         .iter()
-        .filter(|item| matches!(item.command(), Command::SetLeverage(l) if l.account <= 3));
+        .filter(|item| matches!(item.command(), Command::SetLeverage(l) if l.account <= acct(3)));
     assert_eq!(leverage.count(), 3 * 88);
     // K = 1: one account sends every maker message.
     let one = generate(&PolymarketConfig { makers_k: Some(1), ..PolymarketConfig::default() }, 20_000);
-    assert!(one.client_items().all(|item| item.account != 2));
+    assert!(one.client_items().all(|item| item.account != acct(2)));
     // K = 20, the most: every maker holds one bid and one ask rank in every market, and sends.
     let twenty = generate(&PolymarketConfig { makers_k: Some(20), ..PolymarketConfig::default() }, 20_000);
     let makers: std::collections::BTreeSet<AccountId> = twenty
         .timed
         .iter()
         .filter_map(|item| match item {
-            Item::Client(client) if client.account <= 20 => Some(client.account),
+            Item::Client(client) if client.account <= acct(20) => Some(client.account),
             _ => None,
         })
         .collect();
@@ -1323,7 +1375,8 @@ fn the_generator_keeps_its_ladders_whole_and_uncrossed_between_events() {
             assert!(market.bids[0].price <= market.fair && market.asks[0].price > market.fair, "{symbol}");
             for quote in market.bids.iter().chain(&market.asks) {
                 assert!(
-                    on_grid(quote.price) && (quote.price - market.fair).abs() <= market.reach(),
+                    on_grid(quote.price)
+                        && (quote.price - market.fair).ticks().abs() <= market.reach().ticks(),
                     "{symbol}: {quote:?}"
                 );
             }

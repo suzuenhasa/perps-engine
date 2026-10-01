@@ -29,15 +29,17 @@ use engine::command::{
 use engine::engine::{Engine, EngineOptions, FUND};
 use engine::event::{CancelReason, Event};
 use engine::mode::NaiveLiquidation;
-use engine::types::{AccountId, MarketId, OrderId, Price, Side, TimeInForce, order_id};
+use engine::types::{
+    AccountId, MarketId, Micros, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id,
+};
 
 use super::{DiscardingSink, Random};
 
-const MARKET: MarketId = 1;
-const MID: Price = 100_000;
+const MARKET: MarketId = MarketId::new(1);
+const MID: Price = Price::new(100_000);
 const PARAMS: SetMarketParams = SetMarketParams {
-    min_price: 1_000,
-    max_price: 300_000,
+    min_price: Price::new(1_000),
+    max_price: Price::new(300_000),
     maker_fee_ppm: 125,
     taker_fee_ppm: 400,
     price_band_ppm: 22_100,
@@ -140,24 +142,24 @@ impl Flow {
         let mut commands = vec![
             Command::SetMarketParams(PARAMS),
             Command::SetRiskTier(SetRiskTier {
-                lower_bound: 0,
+                lower_bound: Micros::ZERO,
                 market: MARKET,
                 max_leverage: 20,
                 index: 0,
                 count: 1,
             }),
             Command::SetMark(SetMark { price: MID, market: MARKET }),
-            Command::Deposit(Deposit { amount: 1_000_000_000_000, account: FUND }),
+            Command::Deposit(Deposit { amount: Micros::new(1_000_000_000_000), account: FUND }),
         ];
-        for account in 1..=self.accounts {
-            commands.push(Command::Deposit(Deposit { amount: 10_000_000_000, account }));
+        for account in (1..=self.accounts).map(AccountId::new) {
+            commands.push(Command::Deposit(Deposit { amount: Micros::new(10_000_000_000), account }));
             commands.push(self.set_leverage(account));
         }
         commands
     }
 
     fn account(&mut self) -> AccountId {
-        1 + self.random.below(u64::from(self.accounts)) as AccountId
+        AccountId::new(1 + self.random.below(u64::from(self.accounts)) as u32)
     }
 
     fn set_leverage(&mut self, account: AccountId) -> Command {
@@ -167,7 +169,7 @@ impl Flow {
 
     fn new_id(&mut self, account: AccountId) -> OrderId {
         self.seq += 1;
-        order_id(account, self.seq)
+        order_id(account, OrderSeq::new(self.seq))
     }
 
     /// A new order: four in five passive, within 100 ticks of the mark on its own side; the
@@ -176,11 +178,12 @@ impl Flow {
     fn new_order(&mut self, mark: Price) -> PlaceOrder {
         let account = self.account();
         let side = if self.random.percent(50) { Side::Buy } else { Side::Sell };
-        let distance = if self.random.percent(80) {
+        let ticks = if self.random.percent(80) {
             -self.random.between(1, 100)
         } else {
             self.random.between(0, 2_000)
         };
+        let distance = Price::new(ticks);
         let price = match side {
             Side::Buy => mark + distance,
             Side::Sell => mark - distance,
@@ -188,7 +191,7 @@ impl Flow {
         PlaceOrder {
             order_id: self.new_id(account),
             price,
-            qty: self.random.between(1, 50),
+            qty: Qty::new(self.random.between(1, 50)),
             market: MARKET,
             side,
             tif: if self.random.percent(15) { TimeInForce::Ioc } else { TimeInForce::Gtc },
@@ -213,8 +216,8 @@ impl Flow {
             450..480 => {
                 let order = self.new_order(mark);
                 let malformed = match self.random.below(3) {
-                    0 => PlaceOrder { qty: 0, ..order },
-                    1 => PlaceOrder { price: PARAMS.max_price + 1, ..order },
+                    0 => PlaceOrder { qty: Qty::ZERO, ..order },
+                    1 => PlaceOrder { price: PARAMS.max_price + Price::ONE_TICK, ..order },
                     _ => PlaceOrder { order_id: self.pick(&resting).order_id, ..order },
                 };
                 Command::PlaceOrder(malformed)
@@ -222,7 +225,10 @@ impl Flow {
             480..600 => {
                 Command::CancelOrder(CancelOrder { order_id: self.pick(&resting).order_id, market: MARKET })
             }
-            600..620 => Command::CancelOrder(CancelOrder { order_id: order_id(1, u32::MAX), market: MARKET }),
+            600..620 => Command::CancelOrder(CancelOrder {
+                order_id: order_id(AccountId::new(1), OrderSeq::new(u32::MAX)),
+                market: MARKET,
+            }),
             620..900 => {
                 let best =
                     (market.book.bids.first().map(|o| o.price), market.book.asks.first().map(|o| o.price));
@@ -233,17 +239,20 @@ impl Flow {
                 // orders placed around an earlier mark out of the band.
                 let spread = if self.random.percent(75) { 300 } else { 3_000 };
                 Command::SetMark(SetMark {
-                    price: MID + self.random.between(-spread, spread),
+                    price: MID + Price::new(self.random.between(-spread, spread)),
                     market: MARKET,
                 })
             }
             940..955 => {
                 let account = self.account();
-                Command::Deposit(Deposit { amount: self.random.between(1, 1_000_000), account })
+                Command::Deposit(Deposit { amount: Micros::new(self.random.between(1, 1_000_000)), account })
             }
             955..970 => {
                 let account = self.account();
-                Command::Withdraw(Withdraw { amount: self.random.between(1, 1_000_000), account })
+                Command::Withdraw(Withdraw {
+                    amount: Micros::new(self.random.between(1, 1_000_000)),
+                    account,
+                })
             }
             _ => {
                 let account = self.account();
@@ -263,12 +272,20 @@ impl Flow {
         let total = order.filled + order.qty;
         let (id, price, size) = match self.random.below(8) {
             // At or below what has filled: removed (an unfilled order gets size 0: rejected).
-            0 => (order.order_id, order.price, (order.filled - self.random.between(0, 2)).max(0)),
-            1 => (order.order_id, order.price, order.filled + (order.qty - self.random.between(1, 5)).max(1)),
+            0 => (
+                order.order_id,
+                order.price,
+                (order.filled - Qty::new(self.random.between(0, 2))).max(Qty::ZERO),
+            ),
+            1 => (
+                order.order_id,
+                order.price,
+                order.filled + (order.qty - Qty::new(self.random.between(1, 5))).max(Qty::new(1)),
+            ),
             2 => (order.order_id, order.price, total),
-            3 => (order.order_id, order.price, total + self.random.between(1, 5)),
+            3 => (order.order_id, order.price, total + Qty::new(self.random.between(1, 5))),
             4 => {
-                let distance = self.random.between(1, 100);
+                let distance = Price::new(self.random.between(1, 100));
                 let price = if order.side == Side::Buy { mark - distance } else { mark + distance };
                 (order.order_id, price, total)
             }
@@ -277,8 +294,8 @@ impl Flow {
                 let crossing = if order.side == Side::Buy { best_ask } else { best_bid };
                 (order.order_id, crossing.unwrap_or(order.price), total)
             }
-            6 => (order.order_id, PARAMS.max_price + 1, total),
-            _ => (order_id(1, u32::MAX), order.price, total),
+            6 => (order.order_id, PARAMS.max_price + Price::ONE_TICK, total),
+            _ => (order_id(AccountId::new(1), OrderSeq::new(u32::MAX)), order.price, total),
         };
         Command::ModifyOrder(ModifyOrder { order_id: id, new_price: price, new_size: size, market: MARKET })
     }

@@ -28,7 +28,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use engine::command::{CancelOrder, Command, ModifyOrder, PlaceOrder};
-use engine::types::{AccountId, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use k256::ecdsa::signature::Signer;
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 
@@ -85,40 +85,48 @@ const NOW: u64 = 1_790_000_000_000_000_000;
 const NOW_MS: u64 = NOW / 1_000_000;
 const ROOM: usize = 1_024;
 
+/// Account number `n`.
+const fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
+
 fn signing_key(account: AccountId) -> SigningKey {
     let mut bytes = [0u8; 32];
-    bytes[..4].copy_from_slice(&account.to_be_bytes());
+    bytes[..4].copy_from_slice(&account.get().to_be_bytes());
     bytes[31] = 1;
     SigningKey::from_slice(&bytes).expect("a valid scalar")
 }
 
 fn command(account: AccountId, n: u32) -> Command {
-    let id = order_id(account, n);
+    let id = order_id(account, OrderSeq::new(n));
     match n % 3 {
         0 => Command::PlaceOrder(PlaceOrder {
             order_id: id,
-            price: 99_000 + i64::from(n),
-            qty: 10_000,
-            market: 1,
+            price: Price::new(99_000 + i64::from(n)),
+            qty: Qty::new(10_000),
+            market: MarketId::new(1),
             side: if n.is_multiple_of(2) { Side::Buy } else { Side::Sell },
             tif: if n.is_multiple_of(4) { TimeInForce::Ioc } else { TimeInForce::Gtc },
             post_only: n.is_multiple_of(5),
         }),
-        1 => Command::CancelOrder(CancelOrder { order_id: id, market: 1 }),
-        _ => {
-            Command::ModifyOrder(ModifyOrder { order_id: id, new_price: 99_500, new_size: 5_000, market: 1 })
-        }
+        1 => Command::CancelOrder(CancelOrder { order_id: id, market: MarketId::new(1) }),
+        _ => Command::ModifyOrder(ModifyOrder {
+            order_id: id,
+            new_price: Price::new(99_500),
+            new_size: Qty::new(5_000),
+            market: MarketId::new(1),
+        }),
     }
 }
 
 #[test]
 fn the_eip712_checks_allocate_nothing_on_any_path() {
-    let accounts: Vec<AccountId> = (1..=20).collect();
+    let accounts: Vec<AccountId> = (1..=20).map(acct).collect();
     let keys: Vec<(AccountId, VerifyingKey)> =
         accounts.iter().map(|&a| (a, *signing_key(a).verifying_key())).collect();
     let registry = KeyRegistry::from_keys(DEPLOYMENT, &keys, VERIFIER).expect("a valid registry");
     let domain = Domain::new(u64::from(DEPLOYMENT));
-    let mine: Vec<AccountId> = accounts.iter().copied().filter(|a| a % 2 == 1).collect();
+    let mine: Vec<AccountId> = accounts.iter().copied().filter(|a| a.get() % 2 == 1).collect();
 
     // ---- The messages, before anything is counted: per round, one of each outcome.
     let mut messages = Vec::new();
@@ -183,7 +191,7 @@ fn the_eip712_checks_allocate_nothing_on_any_path() {
         let perp_signed = encode_signed_part(DEPLOYMENT, account, 1, u64::MAX, &command(account, round));
         let perp_signature: Signature = signing_key(account).sign(&perp_signed);
         push(assemble(&perp_signed, &perp_signature.to_bytes().into()), ROOM); // WrongDomain
-        let even = account + 1;
+        let even = acct(account.get() + 1);
         let routed = sign_eip712(&signing_key(even), &domain, even, salt, NOW_MS, &command(even, round));
         push(routed, ROOM); // WrongGateway
         let not_owner = sign_eip712(
@@ -238,8 +246,8 @@ fn the_eip712_checks_allocate_nothing_on_any_path() {
     // A full salt table refuses without allocating, too.
     let mut small = Gateway::new_eip712(1, GATEWAYS, DEPLOYMENT, &registry, SaltTable::new(1, 7), 0);
     small.prepare_this_thread();
-    let first = sign_eip712(&signing_key(1), &domain, 1, 1, NOW_MS, &command(1, 1));
-    let second = sign_eip712(&signing_key(1), &domain, 1, 2, NOW_MS, &command(1, 2));
+    let first = sign_eip712(&signing_key(acct(1)), &domain, acct(1), 1, NOW_MS, &command(acct(1), 1));
+    let second = sign_eip712(&signing_key(acct(1)), &domain, acct(1), 2, NOW_MS, &command(acct(1), 2));
     let (allocations, frees) = allocations_and_frees_during(|| {
         assert!(small.check(&first, NOW, ROOM).is_ok());
         assert_eq!(small.check(&second, NOW, ROOM), Err(GatewayReject::SaltTableFull));

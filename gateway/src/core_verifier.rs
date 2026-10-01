@@ -75,7 +75,7 @@ impl fmt::Debug for RegistryVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{high_s_twin, message, place, registry, signing_key};
+    use crate::test_support::{acct, high_s_twin, message, place, registry, signing_key};
     use crate::wire::{MESSAGE_BYTES, R_OFFSET};
     use pipeline::records::signature_words;
 
@@ -88,18 +88,19 @@ mod tests {
 
     #[test]
     fn it_accepts_exactly_what_a_gateway_would() {
-        let verifier = RegistryVerifier::new(&registry(1, DEPLOYMENT, [3, 4, 9]));
-        let good = message(&signing_key(1, 9), DEPLOYMENT, 9, 7, u64::MAX, &place(9, 1));
-        assert!(verifier.verify(9, &place(9, 1), &fields(&good, 7)));
-        assert!(!verifier.verify(9, &place(9, 2), &fields(&good, 7)), "another command");
-        assert!(!verifier.verify(9, &place(9, 1), &fields(&good, 8)), "another nonce");
-        assert!(!verifier.verify(4, &place(9, 1), &fields(&good, 7)), "another account's key");
-        assert!(!verifier.verify(10, &place(9, 1), &fields(&good, 7)), "no key at all");
+        let verifier = RegistryVerifier::new(&registry(1, DEPLOYMENT, [3, 4, 9].map(acct)));
+        let good = message(&signing_key(1, acct(9)), DEPLOYMENT, acct(9), 7, u64::MAX, &place(acct(9), 1));
+        assert!(verifier.verify(acct(9), &place(acct(9), 1), &fields(&good, 7)));
+        assert!(!verifier.verify(acct(9), &place(acct(9), 2), &fields(&good, 7)), "another command");
+        assert!(!verifier.verify(acct(9), &place(acct(9), 1), &fields(&good, 8)), "another nonce");
+        assert!(!verifier.verify(acct(4), &place(acct(9), 1), &fields(&good, 7)), "another account's key");
+        assert!(!verifier.verify(acct(10), &place(acct(9), 1), &fields(&good, 7)), "no key at all");
         let mut high = good;
         let twin = high_s_twin(high[R_OFFSET..].try_into().expect("64 bytes"));
         high[R_OFFSET..].copy_from_slice(&twin);
-        assert!(!verifier.verify(9, &place(9, 1), &fields(&high, 7)), "high-S");
-        let other_deployment = message(&signing_key(1, 9), DEPLOYMENT + 1, 9, 7, u64::MAX, &place(9, 1));
-        assert!(!verifier.verify(9, &place(9, 1), &fields(&other_deployment, 7)));
+        assert!(!verifier.verify(acct(9), &place(acct(9), 1), &fields(&high, 7)), "high-S");
+        let other_deployment =
+            message(&signing_key(1, acct(9)), DEPLOYMENT + 1, acct(9), 7, u64::MAX, &place(acct(9), 1));
+        assert!(!verifier.verify(acct(9), &place(acct(9), 1), &fields(&other_deployment, 7)));
     }
 }

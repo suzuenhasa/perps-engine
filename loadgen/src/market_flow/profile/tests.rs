@@ -14,6 +14,7 @@ use engine::engine::{Engine, EngineOptions};
 use engine::event::Event;
 use engine::mode::Fast;
 use engine::money::{MAX_TIERS, PRICE_LIMIT};
+use engine::types::{Micros, Price};
 
 const MILLION: u32 = 1_000_000;
 
@@ -56,8 +57,8 @@ fn the_table_has_the_88_markets_once_each_in_id_order() {
     assert_eq!(symbols.len(), 88);
     // Polymarket's instrument ids are ours: 1 to 90, without 12 and 51.
     assert_eq!((markets[0].id, markets[87].id), (1, 90));
-    assert!(POLYMARKET.market(12).is_none() && POLYMARKET.market(51).is_none());
-    assert_eq!(POLYMARKET.market(7).map(|market| market.symbol), Some("ETH-USD"));
+    assert!(POLYMARKET.market(MarketId::new(12)).is_none() && POLYMARKET.market(MarketId::new(51)).is_none());
+    assert_eq!(POLYMARKET.market(MarketId::new(7)).map(|market| market.symbol), Some("ETH-USD"));
 }
 
 #[test]
@@ -97,7 +98,7 @@ fn start_prices_are_on_their_real_grid_and_inside_the_price_limits() {
         // D-020: prices below 2^32, and a book at most 2^24 ticks wide, even for the M3 flow's
         // range of half to twice the start price.
         let (min, max) = (start / 2, 2 * start);
-        assert!(max < PRICE_LIMIT, "{}", market.symbol);
+        assert!(max < PRICE_LIMIT.ticks(), "{}", market.symbol);
         assert!((max - min + 1) as usize <= MAX_LEVELS, "{}", market.symbol);
     }
     // D-034: the grid is one tick for 76 markets, 10 for 11, 100 for XRP.
@@ -121,21 +122,22 @@ fn the_engine_accepts_every_market_and_its_tier_table() {
         // Polymarket's own bands (2% at 50x to a third at 3x) break our band rule 1, so a flow
         // sets its own; the M3 flow's shape, 400,000 / Lmax ppm, passes both rules at every
         // leverage here.
+        let id = market.market_id();
         let params = SetMarketParams {
-            min_price: market.start_price / 2,
-            max_price: 2 * market.start_price,
+            min_price: Price::new(market.start_price / 2),
+            max_price: Price::new(2 * market.start_price),
             maker_fee_ppm: 100,
             taker_fee_ppm: 400,
             price_band_ppm: 400_000 / u32::from(market.max_leverage),
-            market: market.id,
+            market: id,
             max_leverage: market.max_leverage,
         };
         let count = market.tiers.len() as u8;
         let rows = market.tiers.iter().enumerate().map(|(index, tier)| {
-            let (lower_bound, max_leverage) = (tier.lower_bound, tier.max_leverage);
+            let (lower_bound, max_leverage) = (Micros::new(tier.lower_bound), tier.max_leverage);
             Command::SetRiskTier(SetRiskTier {
                 lower_bound,
-                market: market.id,
+                market: id,
                 max_leverage,
                 index: index as u8,
                 count,

@@ -7,33 +7,36 @@ use engine::book::{Book, BookConfig, OrderBook};
 use engine::command::PlaceOrder;
 use engine::event::Event;
 use engine::reference::ReferenceBook;
-use engine::types::{Price, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
 /// A resting buy of one lot at `price`, from account 1.
 fn bid(seq: u32, price: Price) -> PlaceOrder {
     PlaceOrder {
-        order_id: order_id(1, seq),
+        order_id: order_id(AccountId::new(1), OrderSeq::new(seq)),
         price,
-        qty: 1,
-        market: 1,
+        qty: Qty::new(1),
+        market: MarketId::new(1),
         side: Side::Buy,
         tif: TimeInForce::Gtc,
         post_only: false,
     }
 }
 
-/// Regression: the reference book ranked bids by `-price`, which overflows at `Price::MIN`.
+/// Regression: the reference book ranked bids by `-price`, which overflows at the lowest
+/// price, `i64::MIN` ticks.
 #[test]
 fn a_bid_at_price_min_ranks_below_a_higher_bid_in_both_books() {
-    // Both books accept a price range that starts at `Price::MIN`: the fast book only
+    // Both books accept a price range that starts at `i64::MIN` ticks: the fast book only
     // limits the range's width. The overflow was a panic in debug builds, and in release
-    // builds it wrapped, so the reference reported `Price::MIN` as the best bid.
-    let config = BookConfig { market: 1, min_price: Price::MIN, max_price: Price::MIN + 10 };
+    // builds it wrapped, so the reference reported the lowest price as the best bid.
+    let price_min = Price::new(i64::MIN);
+    let config =
+        BookConfig { market: MarketId::new(1), min_price: price_min, max_price: price_min + Price::new(10) };
     let mut fast = Book::new(config);
     let mut reference = ReferenceBook::new(config);
 
-    let higher = bid(1, Price::MIN + 5);
-    let lowest = bid(2, Price::MIN);
+    let higher = bid(1, price_min + Price::new(5));
+    let lowest = bid(2, price_min);
     for order in [higher, lowest] {
         let mut fast_events: Vec<Event> = Vec::new();
         let mut reference_events: Vec<Event> = Vec::new();
@@ -43,7 +46,7 @@ fn a_bid_at_price_min_ranks_below_a_higher_bid_in_both_books() {
     }
 
     fast.assert_consistent();
-    assert_eq!(fast.best_bid(), Some(Price::MIN + 5));
+    assert_eq!(fast.best_bid(), Some(price_min + Price::new(5)));
     assert_eq!(fast.snapshot().bids.first().map(|o| o.order_id), Some(higher.order_id));
 
     assert_eq!(reference.best_bid(), fast.best_bid());

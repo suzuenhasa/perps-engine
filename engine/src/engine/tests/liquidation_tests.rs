@@ -12,34 +12,44 @@ use crate::event::{InsuranceAbsorb, InsuranceShortfall, Liquidation};
 // ---------------------------------------------------------------------------------------
 // Events, all in market 1.
 
-fn mark_price(price: Price) -> Event {
-    Event::MarkPrice(MarkPrice { price, market: MARKET })
+/// A mark of `price` ticks.
+fn mark_price(price: i64) -> Event {
+    Event::MarkPrice(MarkPrice { price: px(price), market: MARKET })
 }
 
-fn liquidation(account: AccountId, position: Qty) -> Event {
-    Event::Liquidation(Liquidation { position, account, market: MARKET })
+/// The liquidation of a slot of `position` lots.
+fn liquidation(account: AccountId, position: i64) -> Event {
+    Event::Liquidation(Liquidation { position: lots(position), account, market: MARKET })
 }
 
-fn absorb(position: Qty, cost_basis: Micros, collateral: Micros) -> Event {
-    Event::InsuranceAbsorb(InsuranceAbsorb { position, cost_basis, collateral, market: MARKET })
+/// The fund takes on `position` lots, with `cost_basis` and `collateral` in micros.
+fn absorb(position: i64, cost_basis: i64, collateral: i64) -> Event {
+    Event::InsuranceAbsorb(InsuranceAbsorb {
+        position: lots(position),
+        cost_basis: micros(cost_basis),
+        collateral: micros(collateral),
+        market: MARKET,
+    })
 }
 
 /// The insurance fund's position: it holds no collateral in a slot, so `locked` is 0.
-fn fund_holds(fund_pos: Qty, fund_cost: Micros) -> Event {
+fn fund_holds(fund_pos: i64, fund_cost: i64) -> Event {
     position(FUND, fund_pos, fund_cost, 0)
 }
 
-fn shortfall(uncovered: Micros) -> Event {
-    Event::InsuranceShortfall(InsuranceShortfall { uncovered })
+/// An uncovered bad debt of `uncovered` micros.
+fn shortfall(uncovered: i64) -> Event {
+    Event::InsuranceShortfall(InsuranceShortfall { uncovered: micros(uncovered) })
 }
 
 /// A liquidation's events after its cancels (RISK.md 11): the slot `(pos, cost, locked)` is
-/// taken over, which leaves the fund holding `fund` with a balance of `fund_balance`.
+/// taken over, which leaves the fund holding `fund` with a balance of `fund_balance`. Lots
+/// and micros, as bare numbers.
 fn takeover(
     account: AccountId,
-    (pos, cost, locked): (Qty, Micros, Micros),
-    (fund_pos, fund_cost): (Qty, Micros),
-    fund_balance: Micros,
+    (pos, cost, locked): (i64, i64, i64),
+    (fund_pos, fund_cost): (i64, i64),
+    fund_balance: i64,
 ) -> [Event; 5] {
     [
         liquidation(account, pos),
@@ -93,7 +103,7 @@ fn t1_the_sp500_long_is_liquidated_at_7310_0_and_not_at_7310_1() {
         ]
     );
     // A's key is 73,100 (7,310.0); B's is 76,854 (7,685.4).
-    assert_eq!(h.first_keys(), (Some((73_100, A)), Some((76_854, B))));
+    assert_eq!(h.first_keys(), (Some((px(73_100), A)), Some((px(76_854), B))));
 
     // At 7,310.1 A's equity 182,820,000 is still at least MM 182,752,500.
     assert_eq!(h.accept(mark(73_101)), vec![mark_price(73_101)]);
@@ -111,7 +121,7 @@ fn t1_the_sp500_long_is_liquidated_at_7310_0_and_not_at_7310_1() {
     );
     // The fund gained A's remaining equity of 182,720,000; no shortfall.
     assert_eq!(h.fund_equity(), 1_182_720_000);
-    assert_eq!(h.first_keys(), (None, Some((76_854, B))));
+    assert_eq!(h.first_keys(), (None, Some((px(76_854), B))));
 }
 
 #[test]
@@ -122,7 +132,10 @@ fn t4_a_taker_whose_flip_lands_it_between_zero_and_mm_is_liquidated_after_matchi
     // 1. A is long 1,000 at 100,000 with IM(1,000) locked, and 500,000 left free.
     h.accept_all([sell(B, 1, 100_000, 1_000), buy(A, 1, 100_000, 1_000)]);
     let a = h.slot(A);
-    assert_eq!((a.pos, a.cost, a.locked, h.free(A)), (1_000, 100_000_000, 5_000_000, 500_000));
+    assert_eq!(
+        (a.pos, a.cost, a.locked, h.free(A)),
+        (lots(1_000), micros(100_000_000), micros(5_000_000), micros(500_000))
+    );
     // 2. A rests a buy of 100: W' = 1,100, a top-up of the last 500,000.
     assert_eq!(
         h.accept(buy(A, 2, 97_000, 100)),
@@ -308,7 +321,7 @@ fn three_positions(side: Side) -> Harness {
 fn the_walk_takes_longs_highest_key_first_and_ties_go_to_the_lower_account() {
     let mut h = three_positions(Side::Buy);
     // A and D (20x) share the key 97,435; B (10x, twice the collateral) has 92,307.
-    assert_eq!(h.first_keys().0, Some((97_435, A)));
+    assert_eq!(h.first_keys().0, Some((px(97_435), A)));
     assert_eq!(h.accept(mark(97_436)), vec![mark_price(97_436)]);
     // A gap to 90,000 crosses all three: A before D on the tie, then B. A and D are past
     // their bankruptcy price of 95,000 (equity −5,000,000 each), B is exactly at its own.
@@ -318,17 +331,20 @@ fn the_walk_takes_longs_highest_key_first_and_ties_go_to_the_lower_account() {
     expected.extend(takeover(B, (1_000, 100_000_000, 10_000_000), (3_000, 300_000_000), 1_020_000_000));
     assert_eq!(h.accept(mark(90_000)), expected);
     // Their free balances are untouched; the fund lost the 10,000,000 of bad debt.
-    assert_eq!((h.free(A), h.free(B), h.free(D)), (995_000_000, 990_000_000, 995_000_000));
+    assert_eq!(
+        (h.free(A), h.free(B), h.free(D)),
+        (micros(995_000_000), micros(990_000_000), micros(995_000_000))
+    );
     assert_eq!(h.fund_equity(), 990_000_000);
     // Only C's short is left in the index.
-    assert_eq!(h.first_keys(), (None, Some((195_122, C))));
+    assert_eq!(h.first_keys(), (None, Some((px(195_122), C))));
 }
 
 #[test]
 fn the_walk_takes_shorts_lowest_key_first_and_ties_go_to_the_lower_account() {
     let mut h = three_positions(Side::Sell);
     // A and D (20x) share the key 102,440; B (10x) has 107,318.
-    assert_eq!(h.first_keys().1, Some((102_440, A)));
+    assert_eq!(h.first_keys().1, Some((px(102_440), A)));
     assert_eq!(h.accept(mark(102_439)), vec![mark_price(102_439)]);
     let mut expected = vec![mark_price(110_000)];
     expected.extend(takeover(A, (-1_000, -100_000_000, 5_000_000), (-1_000, -100_000_000), 1_005_000_000));
@@ -371,8 +387,8 @@ fn the_walk_comes_before_the_sweep_so_a_liquidated_accounts_orders_go_as_liquida
 
 /// RISK.md 10.2's setup: A (20x) buys `long_lots` at 100,000 from B and is liquidated at its
 /// key 97,435, so the fund is long `long_lots` at an average of 100,000. Then C (20x) sells
-/// `short_lots` at `short_price` to D, with `IM` at 97,435 locked.
-fn fund_long_then_a_short(long_lots: Qty, short_lots: Qty, short_price: Price) -> Harness {
+/// `short_lots` at `short_price` (in ticks) to D, with `IM` at 97,435 locked.
+fn fund_long_then_a_short(long_lots: i64, short_lots: i64, short_price: i64) -> Harness {
     let mut h = market_20x(0, 0);
     h.accept_all([deposit(FUND, 1_000_000_000), deposit(A, 1_000_000_000), deposit(B, 1_000_000_000)]);
     h.accept_all([deposit(C, 1_000_000_000), deposit(D, 1_000_000_000)]);
@@ -380,7 +396,7 @@ fn fund_long_then_a_short(long_lots: Qty, short_lots: Qty, short_price: Price) -
     h.accept_all([sell(B, 1, 100_000, long_lots), buy(A, 1, 100_000, long_lots)]);
     h.accept(mark(97_435));
     let market = h.market_1();
-    assert_eq!((market.fund_pos, market.fund_cost), (long_lots, long_lots * 100_000));
+    assert_eq!((market.fund_pos, market.fund_cost), (lots(long_lots), lots(long_lots) * px(100_000)));
     h.accept_all([sell(C, 1, short_price, short_lots), buy(D, 1, short_price, short_lots)]);
     h
 }
@@ -461,10 +477,14 @@ fn a_fund_position_keeps_the_market_non_empty_until_netting_flattens_it() {
     h.accept_all([deposit(FUND, 1_000_000_000), deposit(A, 1_000_000_000), deposit(B, 1_000_000_000)]);
     h.accept_all([leverage(A, 20), leverage(B, 20), mark(100_000)]);
     h.accept_all([sell(B, 1, 100_000, 1_000), buy(A, 1, 100_000, 1_000)]);
-    assert_eq!(h.first_keys(), (Some((97_435, A)), Some((102_440, B))));
+    assert_eq!(h.first_keys(), (Some((px(97_435), A)), Some((px(102_440), B))));
     h.accept(mark(97_435));
     let market = h.market_1();
-    assert_eq!((market.fund_pos, market.nonzero_positions), (1_000, 2), "B's short and the fund's long");
+    assert_eq!(
+        (market.fund_pos, market.nonzero_positions),
+        (lots(1_000), 2),
+        "B's short and the fund's long"
+    );
     let new_params = params(500_000, 0, 0, 10_000, 10);
     h.assert_rejected(market_params(new_params), RejectReason::MarketNotEmpty);
     // B's short is taken over at its key; the fund's long and short cancel out exactly.
@@ -509,7 +529,7 @@ fn a_flat_slot_with_negative_collateral_is_liquidated_and_the_fund_absorbs_it() 
         ]
     );
     // The account's free balance is untouched.
-    assert_eq!(h.free(A), 9_500_000);
+    assert_eq!(h.free(A), micros(9_500_000));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -556,5 +576,5 @@ fn f3_orders_that_grow_a_position_can_still_cost_the_fund_after_a_mark_move() {
     );
     // 0.67% of the order's notional.
     assert_eq!(fund_before - h.fund_equity(), 224_015_813);
-    assert_eq!(h.fees_collected(), 21_594_773);
+    assert_eq!(h.fees_collected(), micros(21_594_773));
 }

@@ -107,7 +107,7 @@ fn splitmix64_finaliser(mut z: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::order_id;
+    use crate::types::{AccountId, OrderId, OrderSeq, order_id};
     use std::collections::HashSet;
 
     /// splitmix64's generator adds this constant to its state before each output.
@@ -128,21 +128,22 @@ mod tests {
     #[test]
     fn account_ids_hash_like_the_same_value_as_a_u64() {
         let hasher = IdBuildHasher::new(42);
-        assert_eq!(hasher.hash_one(7u32), hasher.hash_one(7u64));
+        assert_eq!(hasher.hash_one(AccountId::new(7)), hasher.hash_one(7u64));
+        assert_eq!(hasher.hash_one(OrderId::new(7)), hasher.hash_one(7u64));
     }
 
     #[test]
     fn the_seed_changes_every_hash() {
         let (a, b) = (IdBuildHasher::new(1), IdBuildHasher::new(2));
         for seq in 1..1_000 {
-            let id = order_id(5, seq);
-            assert_ne!(a.hash_one(id), b.hash_one(id), "id {id:#x}");
+            let id = order_id(AccountId::new(5), OrderSeq::new(seq));
+            assert_ne!(a.hash_one(id), b.hash_one(id), "id {:#x}", id.get());
         }
     }
 
     /// How many of 1,024 buckets these ids land in, for a table that picks the bucket from
     /// the hash's low 10 bits.
-    fn buckets_used(ids: impl Iterator<Item = u64>) -> usize {
+    fn buckets_used(ids: impl Iterator<Item = OrderId>) -> usize {
         let hasher = IdBuildHasher::new(0x1234);
         ids.map(|id| hasher.hash_one(id) % 1_024).collect::<HashSet<_>>().len()
     }
@@ -153,8 +154,9 @@ mod tests {
         // 1,024 that differ only in the high bits (the first order of many accounts).
         // Random hashes would fill about 647 distinct buckets (1,024 * (1 - 1/e)); the
         // identity hash would put all of the second set in bucket 1.
-        let one_account = buckets_used((0..1_024).map(|seq| order_id(9, seq)));
-        let many_accounts = buckets_used((0..1_024).map(|account| order_id(account, 1)));
+        let one_account = buckets_used((0..1_024).map(|seq| order_id(AccountId::new(9), OrderSeq::new(seq))));
+        let many_accounts =
+            buckets_used((0..1_024).map(|account| order_id(AccountId::new(account), OrderSeq::new(1))));
         assert!(one_account > 580, "one account's ids use only {one_account} buckets");
         assert!(many_accounts > 580, "many accounts' ids use only {many_accounts} buckets");
     }

@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use engine::command::{CancelOrder, Command, Deposit, PlaceOrder, SetMark, SetMarketParams, SetRiskTier};
 use engine::engine::EngineOptions;
-use engine::types::{AccountId, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use k256::ecdsa::signature::Signer;
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use k256::sha2::{Digest, Sha256};
@@ -58,12 +58,17 @@ use pipeline::sequencer::Inputs;
 
 const DEPLOYMENT: u32 = 21;
 const GATEWAYS: usize = 2;
-const ACCOUNTS: [AccountId; 6] = [1, 2, 3, 4, 5, 6];
-const MARKET: u16 = 1;
+const ACCOUNTS: [AccountId; 6] = [acct(1), acct(2), acct(3), acct(4), acct(5), acct(6)];
+const MARKET: MarketId = MarketId::new(1);
 const IDLE: IdleStrategy = IdleStrategy::SpinThenYield { spins: 64 };
 /// The gateways' verifier (module docs).
 const VERIFIER: VerifierKind =
     if cfg!(feature = "c-secp256k1") { VerifierKind::LibSecp256k1 } else { VerifierKind::K256 };
+
+/// Account number `n`.
+const fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
 
 /// Account `account`'s private key for `seed`, derived as the load generator does (14.8).
 fn signing_key(seed: u64, account: AccountId) -> SigningKey {
@@ -72,7 +77,7 @@ fn signing_key(seed: u64, account: AccountId) -> SigningKey {
             let mut hasher = Sha256::new();
             hasher.update(b"perps-loadgen key v1");
             hasher.update(seed.to_le_bytes());
-            hasher.update(account.to_le_bytes());
+            hasher.update(account.get().to_le_bytes());
             hasher.update([c]);
             SigningKey::from_slice(&hasher.finalize()).ok()
         })
@@ -104,9 +109,9 @@ fn message(
 
 fn bid(account: AccountId, sequence: u32) -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(account, sequence),
-        price: 99_000 + i64::from(sequence),
-        qty: 10,
+        order_id: order_id(account, OrderSeq::new(sequence)),
+        price: Price::new(99_000 + i64::from(sequence)),
+        qty: Qty::new(10),
         market: MARKET,
         side: Side::Buy,
         tif: TimeInForce::Gtc,
@@ -117,8 +122,8 @@ fn bid(account: AccountId, sequence: u32) -> Command {
 fn setup() -> Vec<Command> {
     let mut commands = vec![
         Command::SetMarketParams(SetMarketParams {
-            min_price: 1_000,
-            max_price: 1_000_000,
+            min_price: Price::new(1_000),
+            max_price: Price::new(1_000_000),
             maker_fee_ppm: 0,
             taker_fee_ppm: 0,
             price_band_ppm: 20_000,
@@ -126,15 +131,16 @@ fn setup() -> Vec<Command> {
             max_leverage: 10,
         }),
         Command::SetRiskTier(SetRiskTier {
-            lower_bound: 0,
+            lower_bound: Micros::ZERO,
             market: MARKET,
             max_leverage: 10,
             index: 0,
             count: 1,
         }),
-        Command::SetMark(SetMark { price: 100_000, market: MARKET }),
+        Command::SetMark(SetMark { price: Price::new(100_000), market: MARKET }),
     ];
-    commands.extend(ACCOUNTS.iter().map(|&account| Command::Deposit(Deposit { amount: 1 << 40, account })));
+    let amount = Micros::new(1 << 40);
+    commands.extend(ACCOUNTS.iter().map(|&account| Command::Deposit(Deposit { amount, account })));
     commands
 }
 
@@ -320,20 +326,21 @@ fn signed_messages_go_through_the_gateways_survive_a_restart_and_pass_the_audit(
             run.send(account, &message(1, account, n, u64::MAX, &bid(account, n as u32)));
         }
     }
-    let cancel =
-        |account| Command::CancelOrder(CancelOrder { order_id: order_id(account, 1), market: MARKET });
+    let cancel = |account| {
+        Command::CancelOrder(CancelOrder { order_id: order_id(account, OrderSeq::new(1)), market: MARKET })
+    };
     for account in ACCOUNTS {
         run.send(account, &message(1, account, 11, u64::MAX, &cancel(account)));
     }
     // Five bad messages, each for its reason.
-    let first_of_1 = message(1, 1, 1, u64::MAX, &bid(1, 1));
-    run.send(1, &first_of_1); // a replay: StaleNonce
-    run.send_to(1, &message(1, 2, 12, u64::MAX, &bid(2, 12))); // account 2 is gateway 0's: WrongGateway
-    run.send(3, &message(1, 3, 12, clock.start_unix_ns(), &bid(3, 12))); // Expired
-    run.send(4, &message(5, 4, 12, u64::MAX, &bid(4, 12))); // signed with account 5's key: BadSignature
-    let genuine = message(1, 5, 12, u64::MAX, &bid(5, 12));
-    run.send(5, &high_s_twin(&genuine)); // HighS
-    run.send(5, &genuine); // then the genuine low-S form: accepted
+    let first_of_1 = message(1, acct(1), 1, u64::MAX, &bid(acct(1), 1));
+    run.send(acct(1), &first_of_1); // a replay: StaleNonce
+    run.send_to(1, &message(1, acct(2), 12, u64::MAX, &bid(acct(2), 12))); // account 2 is gateway 0's: WrongGateway
+    run.send(acct(3), &message(1, acct(3), 12, clock.start_unix_ns(), &bid(acct(3), 12))); // Expired
+    run.send(acct(4), &message(5, acct(4), 12, u64::MAX, &bid(acct(4), 12))); // signed with account 5's key: BadSignature
+    let genuine = message(1, acct(5), 12, u64::MAX, &bid(acct(5), 12));
+    run.send(acct(5), &high_s_twin(&genuine)); // HighS
+    run.send(acct(5), &genuine); // then the genuine low-S form: accepted
     run.barrier();
     let setup_count = setup().len() as u64;
     let forwarded_1 = 6 * 11 + 1;
@@ -368,7 +375,7 @@ fn signed_messages_go_through_the_gateways_survive_a_restart_and_pass_the_audit(
     assert_eq!(recovered.registry_digests, [registry_1.digest()]);
     let replayed = replay(&journal, &recovered, None, false).expect("replayed");
     for account in ACCOUNTS {
-        let expected = if account == 5 { 12 } else { 11 };
+        let expected = if account == acct(5) { 12 } else { 11 };
         assert_eq!(replayed.nonces.get(account), expected, "account {account}");
     }
     let audit = verify_journal(&journal, std::slice::from_ref(&registry_1));
@@ -376,7 +383,7 @@ fn signed_messages_go_through_the_gateways_survive_a_restart_and_pass_the_audit(
     assert_eq!((audit.signed, audit.operator), (forwarded_1, setup_count));
 
     // ---- Life 2: a restart (13.5), with account 6's key replaced (5.4).
-    let registry_2 = registry(|account| if account == 6 { 2 } else { 1 });
+    let registry_2 = registry(|account| if account == acct(6) { 2 } else { 1 });
     let resume = Resume {
         engine: replayed.engine,
         next_seq: replayed.next_seq,
@@ -386,10 +393,10 @@ fn signed_messages_go_through_the_gateways_survive_a_restart_and_pass_the_audit(
     let clock = RunClock::resume(replayed.last_ts);
     let mut run = Harness::start(&journal, &registry_2, &replayed.nonces, clock, Some(resume));
     run.open_window();
-    run.send(1, &first_of_1); // accepted in life 1: StaleNonce, from the journal's nonces
-    run.send(6, &message(1, 6, 12, u64::MAX, &bid(6, 12))); // the replaced key: BadSignature
-    run.send(6, &message(2, 6, 12, u64::MAX, &bid(6, 12))); // the new key: accepted
-    run.send(1, &message(1, 1, 12, u64::MAX, &bid(1, 12))); // accepted
+    run.send(acct(1), &first_of_1); // accepted in life 1: StaleNonce, from the journal's nonces
+    run.send(acct(6), &message(1, acct(6), 12, u64::MAX, &bid(acct(6), 12))); // the replaced key: BadSignature
+    run.send(acct(6), &message(2, acct(6), 12, u64::MAX, &bid(acct(6), 12))); // the new key: accepted
+    run.send(acct(1), &message(1, acct(1), 12, u64::MAX, &bid(acct(1), 12))); // accepted
     run.barrier();
     let (output, gateways) = run.stop();
     assert_eq!(gateways.forwarded, 2);
@@ -407,6 +414,6 @@ fn signed_messages_go_through_the_gateways_survive_a_restart_and_pass_the_audit(
     let only_first = verify_journal(&journal, std::slice::from_ref(&registry_1));
     assert_eq!(only_first.failures, 2, "the second life's two records can't be checked: {only_first}");
     let replayed = replay(&journal, &recovered, None, false).expect("replayed");
-    assert_eq!((replayed.nonces.get(1), replayed.nonces.get(6)), (12, 12));
+    assert_eq!((replayed.nonces.get(acct(1)), replayed.nonces.get(acct(6))), (12, 12));
     std::fs::remove_dir_all(&dir).expect("cleaned up");
 }

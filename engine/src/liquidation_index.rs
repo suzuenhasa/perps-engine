@@ -61,7 +61,7 @@ use crate::id_hash::{IdBuildHasher, IdMap};
 use crate::types::{AccountId, Price, Side};
 
 /// See the module docs. A long's key is filed under `Side::Buy` and a short's under
-/// `Side::Sell`, as in [`crate::money::liquidation_key`].
+/// `Side::Sell`, as in [`crate::money::SlotMoney::liquidation_key`].
 #[derive(Clone, Debug)]
 pub struct LiquidationIndex {
     /// `Reverse`, so that the highest key comes first.
@@ -82,8 +82,8 @@ impl LiquidationIndex {
     /// Makes the room both sides reserved resident, changing nothing they hold
     /// (`crate::prefault`).
     pub fn prefault(&mut self) {
-        self.longs.prefault(Reverse(0));
-        self.shorts.prefault(0);
+        self.longs.prefault(Reverse(Price::ZERO));
+        self.shorts.prefault(Price::ZERO);
     }
 
     /// Files `account` under `key`. It must not be filed on that side already.
@@ -175,8 +175,8 @@ impl<K: Ord + Copy> IndexedHeap<K> {
 
     /// See [`LiquidationIndex::prefault`]. `filler` is any key, written into spare room.
     fn prefault(&mut self, filler: K) {
-        crate::prefault::touch_spare(&mut self.entries, (filler, 0));
-        crate::prefault::touch_map(&mut self.positions, |i| i as AccountId, || None);
+        crate::prefault::touch_spare(&mut self.entries, (filler, AccountId::new(0)));
+        crate::prefault::touch_map(&mut self.positions, |i| AccountId::new(i as u32), || None);
     }
 
     fn first(&self) -> Option<(K, AccountId)> {
@@ -315,64 +315,77 @@ mod tests {
         LiquidationIndex::with_capacity(16, IdBuildHasher::new(0))
     }
 
+    /// A key of `ticks` ticks.
+    fn px(ticks: i64) -> Price {
+        Price::new(ticks)
+    }
+
+    /// Account number `n`.
+    fn acct(n: u32) -> AccountId {
+        AccountId::new(n)
+    }
+
     #[test]
     fn longs_come_highest_key_first_and_shorts_lowest_first_ties_to_the_lower_account() {
         let mut index = empty_index();
         assert_eq!((index.first_long(), index.first_short()), (None, None));
         for (key, account) in [(73_100, 5), (73_200, 9), (73_200, 2), (70_000, 1)] {
-            index.insert(Side::Buy, key, account);
+            index.insert(Side::Buy, px(key), acct(account));
         }
         for (key, account) in [(76_854, 3), (76_000, 8), (76_000, 4)] {
-            index.insert(Side::Sell, key, account);
+            index.insert(Side::Sell, px(key), acct(account));
         }
-        assert_eq!(index.first_long(), Some((73_200, 2)));
-        assert_eq!(index.first_short(), Some((76_000, 4)));
+        assert_eq!(index.first_long(), Some((px(73_200), acct(2))));
+        assert_eq!(index.first_short(), Some((px(76_000), acct(4))));
         assert_eq!(
             index.entries(),
             vec![
-                (Side::Buy, 73_200, 2),
-                (Side::Buy, 73_200, 9),
-                (Side::Buy, 73_100, 5),
-                (Side::Buy, 70_000, 1),
-                (Side::Sell, 76_000, 4),
-                (Side::Sell, 76_000, 8),
-                (Side::Sell, 76_854, 3),
+                (Side::Buy, px(73_200), acct(2)),
+                (Side::Buy, px(73_200), acct(9)),
+                (Side::Buy, px(73_100), acct(5)),
+                (Side::Buy, px(70_000), acct(1)),
+                (Side::Sell, px(76_000), acct(4)),
+                (Side::Sell, px(76_000), acct(8)),
+                (Side::Sell, px(76_854), acct(3)),
             ]
         );
 
-        index.remove(Side::Buy, 73_200, 2);
-        index.remove(Side::Sell, 76_000, 4);
-        assert_eq!(index.first_long(), Some((73_200, 9)));
-        assert_eq!(index.first_short(), Some((76_000, 8)));
+        index.remove(Side::Buy, px(73_200), acct(2));
+        index.remove(Side::Sell, px(76_000), acct(4));
+        assert_eq!(index.first_long(), Some((px(73_200), acct(9))));
+        assert_eq!(index.first_short(), Some((px(76_000), acct(8))));
         index.assert_consistent();
     }
 
     #[test]
     fn the_same_account_and_key_on_different_sides_are_different_entries() {
         let mut index = empty_index();
-        index.insert(Side::Buy, 100, 1);
-        index.insert(Side::Sell, 100, 1);
-        index.remove(Side::Buy, 100, 1);
-        assert_eq!(index.entries(), vec![(Side::Sell, 100, 1)]);
+        index.insert(Side::Buy, px(100), acct(1));
+        index.insert(Side::Sell, px(100), acct(1));
+        index.remove(Side::Buy, px(100), acct(1));
+        assert_eq!(index.entries(), vec![(Side::Sell, px(100), acct(1))]);
         index.assert_consistent();
     }
 
     #[test]
     fn refiling_moves_an_entry_within_its_side_or_across_sides() {
         let mut index = empty_index();
-        index.insert(Side::Buy, 90, 1);
-        index.insert(Side::Buy, 80, 2);
+        index.insert(Side::Buy, px(90), acct(1));
+        index.insert(Side::Buy, px(80), acct(2));
         // A realized loss raises account 2's key past account 1's: it becomes the first long.
-        index.refile(2, Some((Side::Buy, 80)), Some((Side::Buy, 95)));
-        assert_eq!(index.first_long(), Some((95, 2)));
+        index.refile(acct(2), Some((Side::Buy, px(80))), Some((Side::Buy, px(95))));
+        assert_eq!(index.first_long(), Some((px(95), acct(2))));
         // The long flips to a short, then closes.
-        index.refile(2, Some((Side::Buy, 95)), Some((Side::Sell, 120)));
-        assert_eq!((index.first_long(), index.first_short()), (Some((90, 1)), Some((120, 2))));
-        index.refile(2, Some((Side::Sell, 120)), None);
-        assert_eq!(index.entries(), vec![(Side::Buy, 90, 1)]);
+        index.refile(acct(2), Some((Side::Buy, px(95))), Some((Side::Sell, px(120))));
+        assert_eq!(
+            (index.first_long(), index.first_short()),
+            (Some((px(90), acct(1))), Some((px(120), acct(2))))
+        );
+        index.refile(acct(2), Some((Side::Sell, px(120))), None);
+        assert_eq!(index.entries(), vec![(Side::Buy, px(90), acct(1))]);
         // Filed again later, on the side it was on before.
-        index.refile(2, None, Some((Side::Buy, 90)));
-        assert_eq!(index.first_long(), Some((90, 1)), "a tie goes to the lower account");
+        index.refile(acct(2), None, Some((Side::Buy, px(90))));
+        assert_eq!(index.first_long(), Some((px(90), acct(1))), "a tie goes to the lower account");
         index.assert_consistent();
     }
 
@@ -399,17 +412,17 @@ mod tests {
             let mut filed: Vec<Option<(Side, Price)>> = vec![None; accounts as usize];
             for step in 0..20_000 {
                 let account = random_below(&mut state, accounts) as usize;
-                let key = random_below(&mut state, 40) as Price;
+                let key = px(random_below(&mut state, 40) as i64);
                 let new = match random_below(&mut state, 5) {
                     0 => None,
                     1 | 2 => Some((Side::Buy, key)),
                     3 => Some((Side::Sell, key)),
                     // A small move of the current key, as after a top-up or a release.
                     _ => filed[account]
-                        .map(|(side, old)| (side, old + random_below(&mut state, 3) as Price - 1)),
+                        .map(|(side, old)| (side, old + px(random_below(&mut state, 3) as i64 - 1))),
                 };
                 // As the engine's re-key does: nothing if the key didn't change.
-                let (id, old) = (account as AccountId, filed[account]);
+                let (id, old) = (AccountId::new(account as u32), filed[account]);
                 if new == old {
                     continue;
                 }

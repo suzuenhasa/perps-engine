@@ -340,7 +340,7 @@ fn pre_verified_polymarket_smoke_run_with_three_makers_and_bursts() {
     check(&result, allocations);
     // Three accounts make every market: one of them sends the most.
     let (busiest, _) = result.content.busiest_account.expect("someone sent");
-    assert!((1..=3).contains(&busiest), "the busiest account is {busiest}");
+    assert!((1..=3).contains(&busiest.get()), "the busiest account is {busiest}");
 }
 
 /// The Polymarket-shaped flow's signed smoke run in Polymarket Perps' EIP-712 scheme

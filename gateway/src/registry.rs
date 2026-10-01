@@ -295,7 +295,8 @@ fn check_one_spelling(
 /// One account line: `<account in decimal> <66 hex digits>`, its key parsed for `verifier`.
 fn parse_account_line(line: &str, verifier: VerifierKind) -> Result<(AccountId, PublicKey), String> {
     let (account, key) = line.split_once(' ').ok_or("expected `<account> <66 hex digits>`")?;
-    let account: AccountId = parse_decimal(account).ok_or(format!("{account:?} is not an account id"))?;
+    let number: u32 = parse_decimal(account).ok_or(format!("{account:?} is not an account id"))?;
+    let account = AccountId::new(number);
     if account == FUND {
         return Err(format!("account {FUND} is the insurance fund, which can't trade"));
     }
@@ -334,14 +335,19 @@ pub fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{ACCOUNT_9_PUBLIC_KEY, VERIFIER, public_key, signing_key};
+    use crate::test_support::{ACCOUNT_9_PUBLIC_KEY, VERIFIER, acct, public_key, signing_key};
 
     fn key(account: AccountId) -> VerifyingKey {
         *signing_key(1, account).verifying_key()
     }
 
+    /// Account `n` with its key.
+    fn keyed(n: u32) -> (AccountId, VerifyingKey) {
+        (acct(n), key(acct(n)))
+    }
+
     fn good_text() -> String {
-        registry_text(1, &[(9, key(9)), (1, key(1)), (2, key(2))])
+        registry_text(1, &[keyed(9), keyed(1), keyed(2)])
     }
 
     fn parse(text: &str, deployment: u32) -> Result<KeyRegistry, RegistryError> {
@@ -362,11 +368,11 @@ mod tests {
 
         let registry = parse(&text, 1).expect("loads");
         assert_eq!((registry.deployment(), registry.len(), registry.verifier()), (1, 3, VERIFIER));
-        assert_eq!(registry.key(9), Some(&public_key(&signing_key(1, 9))));
-        assert_eq!(registry.key(3), None);
+        assert_eq!(registry.key(acct(9)), Some(&public_key(&signing_key(1, acct(9)))));
+        assert_eq!(registry.key(acct(3)), None);
         let digest: [u8; 32] = Sha256::digest(text.as_bytes()).into();
         assert_eq!(registry.digest(), digest);
-        let keys = [(1, key(1)), (2, key(2)), (9, key(9))];
+        let keys = [keyed(1), keyed(2), keyed(9)];
         let from_keys = KeyRegistry::from_keys(1, &keys, VERIFIER).expect("valid");
         assert_eq!(from_keys.digest(), digest);
         assert!(format!("{registry:?}").contains(&hex(&digest)));
@@ -377,7 +383,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("gateway-registry-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("created");
         let path = dir.join("keys.txt");
-        let digest = write_registry(&path, 5, &[(4, key(4)), (3, key(3))]).expect("written");
+        let digest = write_registry(&path, 5, &[keyed(4), keyed(3)]).expect("written");
         let registry = KeyRegistry::load(&path, 5, VERIFIER).expect("loads");
         assert_eq!(registry.digest(), digest);
         assert_eq!(registry.len(), 2);
@@ -389,11 +395,11 @@ mod tests {
     #[test]
     fn a_gateway_gets_the_accounts_that_route_to_it() {
         let accounts = [1, 2, 3, 4, 9, 10, 17];
-        let keys: Vec<_> = accounts.iter().map(|&a| (a, key(a))).collect();
+        let keys = accounts.map(keyed);
         let registry = KeyRegistry::from_keys(1, &keys, VERIFIER).expect("valid");
         let of = |g| registry.partition(g, 8).map(|(account, _)| account).collect::<Vec<_>>();
-        assert_eq!(of(1), [1, 9, 17]);
-        assert_eq!(of(2), [2, 10]);
+        assert_eq!(of(1), [1, 9, 17].map(acct));
+        assert_eq!(of(2), [2, 10].map(acct));
         assert_eq!(of(0), [] as [AccountId; 0]);
         let all: usize = (0..8).map(|g| registry.partition(g, 8).count()).sum();
         assert_eq!(all, accounts.len(), "every account on exactly one gateway");
@@ -463,7 +469,7 @@ mod tests {
             "{}",
             error_of(&text)
         );
-        let keys = [(FUND, key(9))];
+        let keys = [(FUND, key(acct(9)))];
         assert!(KeyRegistry::from_keys(1, &keys, VERIFIER).is_err());
     }
 

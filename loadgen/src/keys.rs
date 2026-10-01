@@ -40,7 +40,7 @@ pub fn key_candidate(seed: u64, account: AccountId, counter: u8) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(KEY_DOMAIN);
     hasher.update(seed.to_le_bytes());
-    hasher.update(account.to_le_bytes());
+    hasher.update(account.get().to_le_bytes());
     hasher.update([counter]);
     hasher.finalize().into()
 }
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn account_9_with_seed_1_has_the_key_of_the_worked_example() {
         // PIPELINE.md 5.6, computed by two independent Python models.
-        let key = signing_key(1, 9);
+        let key = signing_key(1, AccountId::new(9));
         assert_eq!(hex(&key.to_bytes()), "af3ac022da885faa582f5ec5f871ed9d0868a43a7bf5ddc0268209ca743cea37");
         let public = key.verifying_key().to_sec1_point(true);
         assert_eq!(
@@ -107,16 +107,20 @@ mod tests {
     #[test]
     fn other_accounts_and_seeds_match_the_formula() {
         // Computed with Python's hashlib from the formula in the module docs.
-        let vectors: [(u64, AccountId, &str); 3] = [
+        let vectors: [(u64, u32, &str); 3] = [
             (1, 1_001, "b9d309fb79b8b03db5a02a3cec55b75b61efda5a8f13ba95f84b841ad949e4f0"),
             (7, 5_001, "04c50220a8ad1031bca635ce253a2b98f994dc9aed29852396a38a9181a9dd68"),
             (u64::MAX, 4_294_967_294, "446122ac9ddfdc2f7ce054247d7cc622f0e0c8b96c835fa1a72af9449b40cdca"),
         ];
         for (seed, account, expected) in vectors {
+            let account = AccountId::new(account);
             assert_eq!(hex(&key_candidate(seed, account, 0)), expected);
             assert_eq!(hex(&signing_key(seed, account).to_bytes()), expected);
         }
-        assert_ne!(signing_key(1, 9).to_bytes(), signing_key(2, 9).to_bytes());
+        assert_ne!(
+            signing_key(1, AccountId::new(9)).to_bytes(),
+            signing_key(2, AccountId::new(9)).to_bytes()
+        );
     }
 
     #[test]
@@ -138,7 +142,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("loadgen-keys-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("created");
         let path = dir.join("keys.txt");
-        let accounts = [1, 9, 1_001, 5_001, 7_200];
+        let accounts = [1, 9, 1_001, 5_001, 7_200].map(AccountId::new);
         let digest = write_registry(&path, 1, 42, &accounts).expect("written");
         let loaded = KeyRegistry::load(&path, 42, VerifierKind::K256).expect("the gateway loads it");
         assert_eq!(loaded.digest(), digest);

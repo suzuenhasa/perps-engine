@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use engine::command::{CancelOrder, Command, Deposit, PlaceOrder, SetMark, SetMarketParams, SetRiskTier};
 use engine::engine::EngineOptions;
-use engine::types::{AccountId, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use k256::ecdsa::signature::Signer;
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use k256::sha2::{Digest, Sha256};
@@ -58,12 +58,17 @@ use pipeline::sequencer::Inputs;
 
 const DEPLOYMENT: u32 = 137;
 const GATEWAYS: usize = 2;
-const ACCOUNTS: [AccountId; 4] = [1, 2, 3, 4];
-const MARKET: u16 = 1;
+const ACCOUNTS: [AccountId; 4] = [acct(1), acct(2), acct(3), acct(4)];
+const MARKET: MarketId = MarketId::new(1);
 const IDLE: IdleStrategy = IdleStrategy::SpinThenYield { spins: 64 };
 /// The gateways' verifier (module docs).
 const VERIFIER: VerifierKind =
     if cfg!(feature = "c-secp256k1") { VerifierKind::LibSecp256k1 } else { VerifierKind::K256 };
+
+/// Account number `n`.
+const fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
 
 /// Account `account`'s private key, derived as the load generator does (14.8), seed 1.
 fn signing_key(account: AccountId) -> SigningKey {
@@ -72,7 +77,7 @@ fn signing_key(account: AccountId) -> SigningKey {
             let mut hasher = Sha256::new();
             hasher.update(b"perps-loadgen key v1");
             hasher.update(1u64.to_le_bytes());
-            hasher.update(account.to_le_bytes());
+            hasher.update(account.get().to_le_bytes());
             hasher.update([c]);
             SigningKey::from_slice(&hasher.finalize()).ok()
         })
@@ -81,9 +86,9 @@ fn signing_key(account: AccountId) -> SigningKey {
 
 fn bid(account: AccountId, sequence: u32) -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(account, sequence),
-        price: 99_000 + i64::from(sequence),
-        qty: 10,
+        order_id: order_id(account, OrderSeq::new(sequence)),
+        price: Price::new(99_000 + i64::from(sequence)),
+        qty: Qty::new(10),
         market: MARKET,
         side: Side::Buy,
         tif: TimeInForce::Gtc,
@@ -94,8 +99,8 @@ fn bid(account: AccountId, sequence: u32) -> Command {
 fn setup() -> Vec<Command> {
     let mut commands = vec![
         Command::SetMarketParams(SetMarketParams {
-            min_price: 1_000,
-            max_price: 1_000_000,
+            min_price: Price::new(1_000),
+            max_price: Price::new(1_000_000),
             maker_fee_ppm: 0,
             taker_fee_ppm: 0,
             price_band_ppm: 20_000,
@@ -103,15 +108,16 @@ fn setup() -> Vec<Command> {
             max_leverage: 10,
         }),
         Command::SetRiskTier(SetRiskTier {
-            lower_bound: 0,
+            lower_bound: Micros::ZERO,
             market: MARKET,
             max_leverage: 10,
             index: 0,
             count: 1,
         }),
-        Command::SetMark(SetMark { price: 100_000, market: MARKET }),
+        Command::SetMark(SetMark { price: Price::new(100_000), market: MARKET }),
     ];
-    commands.extend(ACCOUNTS.iter().map(|&account| Command::Deposit(Deposit { amount: 1 << 40, account })));
+    let amount = Micros::new(1 << 40);
+    commands.extend(ACCOUNTS.iter().map(|&account| Command::Deposit(Deposit { amount, account })));
     commands
 }
 
@@ -237,25 +243,26 @@ fn eip712_messages_go_through_the_gateways_and_pass_the_audit() {
             genuine.push((account, u64::from(n)));
         }
     }
-    let cancel =
-        |account| Command::CancelOrder(CancelOrder { order_id: order_id(account, 1), market: MARKET });
+    let cancel = |account| {
+        Command::CancelOrder(CancelOrder { order_id: order_id(account, OrderSeq::new(1)), market: MARKET })
+    };
     for account in ACCOUNTS {
         send(account, &signed(account, 11, now_ms(), &cancel(account)));
     }
     // ---- Six bad messages, each for its reason, then one good one.
-    let first_of_1 = signed(1, 12, now_ms(), &bid(1, 12));
-    send(1, &first_of_1);
-    send(1, &first_of_1); // ReusedRequest
-    send(2, &signed(2, 12, now_ms() - 300_001 - 5_000, &bid(2, 12))); // StaleTimestamp
-    send(3, &signed(3, 12, now_ms() + 60_001 + 5_000, &bid(3, 12))); // FutureTimestamp
-    let by_4 = sign_eip712(&signing_key(4), &domain, 3, 13, now_ms(), &bid(3, 13));
-    send(3, &by_4); // WrongSigner: account 4's key, claiming account 3
-    let good_4 = signed(4, 12, now_ms(), &bid(4, 12));
-    send(4, &high_s_twin(&good_4)); // HighS
-    let perp_signed = encode_signed_part(DEPLOYMENT, 4, 1, u64::MAX, &bid(4, 13));
-    let perp_signature: Signature = signing_key(4).sign(&perp_signed);
-    send(4, &assemble(&perp_signed, &perp_signature.to_bytes().into())); // WrongDomain: version 1
-    send(4, &good_4); // the low form: accepted
+    let first_of_1 = signed(acct(1), 12, now_ms(), &bid(acct(1), 12));
+    send(acct(1), &first_of_1);
+    send(acct(1), &first_of_1); // ReusedRequest
+    send(acct(2), &signed(acct(2), 12, now_ms() - 300_001 - 5_000, &bid(acct(2), 12))); // StaleTimestamp
+    send(acct(3), &signed(acct(3), 12, now_ms() + 60_001 + 5_000, &bid(acct(3), 12))); // FutureTimestamp
+    let by_4 = sign_eip712(&signing_key(acct(4)), &domain, acct(3), 13, now_ms(), &bid(acct(3), 13));
+    send(acct(3), &by_4); // WrongSigner: account 4's key, claiming account 3
+    let good_4 = signed(acct(4), 12, now_ms(), &bid(acct(4), 12));
+    send(acct(4), &high_s_twin(&good_4)); // HighS
+    let perp_signed = encode_signed_part(DEPLOYMENT, acct(4), 1, u64::MAX, &bid(acct(4), 13));
+    let perp_signature: Signature = signing_key(acct(4)).sign(&perp_signed);
+    send(acct(4), &assemble(&perp_signed, &perp_signature.to_bytes().into())); // WrongDomain: version 1
+    send(acct(4), &good_4); // the low form: accepted
     let forwarded = ACCOUNTS.len() as u64 * 11 + 2;
 
     // ---- The barrier of 14.4, then stop in data-flow order (2.8).

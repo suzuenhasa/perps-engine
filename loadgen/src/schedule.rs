@@ -269,17 +269,21 @@ mod tests {
     use super::*;
     use crate::market_flow::ClientItem;
     use engine::command::{CancelOrder, Command, SetMark};
+    use engine::types::{AccountId, MarketId, OrderId, Price};
 
     fn client() -> Item {
         Item::Client(ClientItem {
-            account: 1,
+            account: AccountId::new(1),
             nonce: 1,
-            command: Command::CancelOrder(CancelOrder { order_id: 1, market: 1 }),
+            command: Command::CancelOrder(CancelOrder {
+                order_id: OrderId::new(1),
+                market: MarketId::new(1),
+            }),
         })
     }
 
     fn operator() -> Item {
-        Item::Operator(Command::SetMark(SetMark { price: 100, market: 1 }))
+        Item::Operator(Command::SetMark(SetMark { price: Price::new(100), market: MarketId::new(1) }))
     }
 
     #[test]

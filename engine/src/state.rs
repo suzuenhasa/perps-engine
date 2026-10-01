@@ -20,7 +20,7 @@ use crate::book::OrderBook;
 use crate::command::{SetMarketParams, SetRiskTier};
 use crate::id_hash::{IdBuildHasher, IdMap};
 use crate::liquidation_index::LiquidationIndex;
-use crate::money::{self, MAX_TIERS, Tier, apply_change};
+use crate::money::{self, Holding, MAX_TIERS, SlotMoney, Tier};
 use crate::types::{AccountId, Micros, Price, Qty, Side};
 
 /// One account's engine-wide state (RISK.md 3.1). The insurance fund has none: its balance
@@ -36,7 +36,7 @@ pub struct Account {
 
 impl Account {
     /// A new account: no money, and every sequence number still available.
-    pub const NEW: Account = Account { free: 0, next_seq: 0 };
+    pub const NEW: Account = Account { free: Micros::ZERO, next_seq: 0 };
 }
 
 /// One account's isolated position in one market (RISK.md 3.2).
@@ -71,20 +71,26 @@ pub struct Slot {
 impl Slot {
     /// A new slot: flat, no collateral, no orders, leverage 1.
     pub const NEW: Slot = Slot {
-        pos: 0,
-        cost: 0,
-        locked: 0,
-        open_buys: 0,
-        open_sells: 0,
+        pos: Qty::ZERO,
+        cost: Micros::ZERO,
+        locked: Micros::ZERO,
+        open_buys: Qty::ZERO,
+        open_sells: Qty::ZERO,
         leverage: 1,
         indexed_key: None,
         key_dirty: false,
         touched_in: 0,
     };
 
+    /// The slot's position, cost basis and collateral, for the formulas that read them
+    /// together (`money::SlotMoney`).
+    pub fn money(&self) -> SlotMoney {
+        SlotMoney { pos: self.pos, cost: self.cost, locked: self.locked }
+    }
+
     /// Equity at `mark`: collateral plus unrealized PnL.
     pub fn equity(&self, mark: Price) -> Micros {
-        money::equity(self.pos, self.cost, self.locked, mark)
+        self.money().equity(mark)
     }
 }
 
@@ -152,15 +158,15 @@ impl<B: OrderBook> Market<B> {
             staged_rows: 0,
             staged_count: 0,
             mark: None,
-            upper: 0,
-            lower: 0,
+            upper: Price::ZERO,
+            lower: Price::ZERO,
             book,
             slots: IdMap::with_capacity_and_hasher(slot_capacity, hasher),
             accounts: Vec::with_capacity(slot_capacity),
-            fund_pos: 0,
-            fund_cost: 0,
+            fund_pos: Qty::ZERO,
+            fund_cost: Micros::ZERO,
             fund_upnl: 0,
-            fees_collected: 0,
+            fees_collected: Micros::ZERO,
             nonzero_positions: 0,
             index: LiquidationIndex::with_capacity(slot_capacity, hasher),
         }
@@ -170,8 +176,8 @@ impl<B: OrderBook> Market<B> {
     /// (`Engine::prefault`): the slots map and the list of accounts, the liquidation index
     /// and the book.
     pub fn prefault(&mut self) {
-        crate::prefault::touch_map(&mut self.slots, |i| i as AccountId, || Slot::NEW);
-        crate::prefault::touch_spare(&mut self.accounts, 0);
+        crate::prefault::touch_map(&mut self.slots, |i| AccountId::new(i as u32), || Slot::NEW);
+        crate::prefault::touch_spare(&mut self.accounts, AccountId::new(0));
         self.index.prefault();
         self.book.prefault();
     }
@@ -240,13 +246,14 @@ impl<B: OrderBook> Market<B> {
         // The field, not `slot_mut()`, so that the count of positions can change alongside.
         let slot =
             self.slots.get_mut(&account).unwrap_or_else(|| panic!("account {account} has no slot here"));
-        let was_open = slot.pos != 0;
-        let change = apply_change(slot.pos, slot.cost, lots, lots * price);
+        let was_open = slot.pos != Qty::ZERO;
+        let held = Holding { pos: slot.pos, cost: slot.cost };
+        let change = held.apply_change(Holding { pos: lots, cost: lots * price });
         slot.pos = change.pos;
         slot.cost = change.cost;
         slot.locked += change.realized - fee;
         slot.key_dirty = true;
-        count_position_change(&mut self.nonzero_positions, was_open, slot.pos != 0);
+        count_position_change(&mut self.nonzero_positions, was_open, slot.pos != Qty::ZERO);
         slot
     }
 
@@ -258,9 +265,9 @@ impl<B: OrderBook> Market<B> {
     pub fn empty_slot(&mut self, account: AccountId) -> Absorbed {
         let slot = self.slot_mut(account);
         let taken = Absorbed { pos: slot.pos, cost: slot.cost, locked: slot.locked };
-        (slot.pos, slot.cost, slot.locked) = (0, 0, 0);
+        (slot.pos, slot.cost, slot.locked) = (Qty::ZERO, Micros::ZERO, Micros::ZERO);
         slot.key_dirty = true;
-        count_position_change(&mut self.nonzero_positions, taken.pos != 0, false);
+        count_position_change(&mut self.nonzero_positions, taken.pos != Qty::ZERO, false);
         taken
     }
 
@@ -269,11 +276,12 @@ impl<B: OrderBook> Market<B> {
     /// part of the fill's `qty × price`. Returns the PnL that realizes, which goes to the
     /// fund's balance. Keeps `nonzero_positions` in step (the fund's position counts).
     pub fn net_into_fund(&mut self, pos: Qty, cost: Micros) -> Micros {
-        let was_open = self.fund_pos != 0;
-        let change = apply_change(self.fund_pos, self.fund_cost, pos, cost);
+        let was_open = self.fund_pos != Qty::ZERO;
+        let fund = Holding { pos: self.fund_pos, cost: self.fund_cost };
+        let change = fund.apply_change(Holding { pos, cost });
         self.fund_pos = change.pos;
         self.fund_cost = change.cost;
-        count_position_change(&mut self.nonzero_positions, was_open, change.pos != 0);
+        count_position_change(&mut self.nonzero_positions, was_open, change.pos != Qty::ZERO);
         change.realized
     }
 

@@ -16,9 +16,13 @@
 //! to 14; 0 is never a tag, so a zeroed buffer is never a valid record), bytes 1 to 3 small
 //! fields `a`, `b`, `c`, bytes 4..6 the market (`u16`) and bytes 6..8 a field `x` (`u16`).
 //! Then four (commands) or six (events) 8-byte fields `f1`, `f2`, ... Integers are
-//! little-endian; an `i64` is its two's-complement bits; a `u32` in an 8-byte field takes
-//! the low 4 bytes and the others are zero. The tables in 4.2 and 4.3 say which field holds
-//! what, and mark the reserved bytes, which must be zero, with a dash.
+//! little-endian; an `i64` is its two's-complement bits, and so is a price, a quantity or an
+//! amount: its number of ticks, lots or micro-dollars, read with `.ticks()`, `.lots()` or
+//! `.micros()` and rebuilt with `::new`. An id is its number, read with `.get()` and
+//! rebuilt with `::new`: a market's `u16` in the head, an account's `u32` or an order's
+//! `u64` in a field. A `u32` in an 8-byte field takes the low 4 bytes and the others are
+//! zero. The tables in 4.2 and 4.3 say which field holds what, and mark
+//! the reserved bytes, which must be zero, with a dash.
 //!
 //! **Field by field.** The engine's structs are `repr(C)` with padding bytes whose contents
 //! are undefined, so their memory is never copied: every field is placed explicitly
@@ -47,7 +51,7 @@ use engine::event::{
     Ack, BalanceChanged, CancelReason, Cancelled, Event, Fill, InsuranceAbsorb, InsuranceShortfall,
     LeverageSet, Liquidation, MarkPrice, Modified, PositionChanged, Reject, RejectReason,
 };
-use engine::types::{Side, TimeInForce};
+use engine::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce};
 
 /// Words in a CMD40 encoding.
 pub const COMMAND_WORDS: usize = 5;
@@ -191,22 +195,27 @@ pub fn encode_command(command: &Command) -> [u64; COMMAND_WORDS] {
                 a: side_code(o.side),
                 b: tif_code(o.tif),
                 c: u8::from(o.post_only),
-                market: o.market,
+                market: o.market.get(),
                 ..Head::of(tag)
             },
-            [o.order_id, o.price as u64, o.qty as u64, 0],
+            [o.order_id.get(), o.price.ticks() as u64, o.qty.lots() as u64, 0],
         ),
-        Command::CancelOrder(c) => (Head { market: c.market, ..Head::of(tag) }, [c.order_id, 0, 0, 0]),
-        Command::ModifyOrder(m) => (
-            Head { market: m.market, ..Head::of(tag) },
-            [m.order_id, m.new_price as u64, m.new_size as u64, 0],
-        ),
-        Command::Deposit(d) => (Head::of(tag), [d.amount as u64, u64::from(d.account), 0, 0]),
-        Command::Withdraw(w) => (Head::of(tag), [w.amount as u64, u64::from(w.account), 0, 0]),
-        Command::SetLeverage(l) => {
-            (Head { market: l.market, x: l.leverage, ..Head::of(tag) }, [u64::from(l.account), 0, 0, 0])
+        Command::CancelOrder(c) => {
+            (Head { market: c.market.get(), ..Head::of(tag) }, [c.order_id.get(), 0, 0, 0])
         }
-        Command::SetMark(m) => (Head { market: m.market, ..Head::of(tag) }, [m.price as u64, 0, 0, 0]),
+        Command::ModifyOrder(m) => (
+            Head { market: m.market.get(), ..Head::of(tag) },
+            [m.order_id.get(), m.new_price.ticks() as u64, m.new_size.lots() as u64, 0],
+        ),
+        Command::Deposit(d) => (Head::of(tag), [d.amount.micros() as u64, u64::from(d.account.get()), 0, 0]),
+        Command::Withdraw(w) => (Head::of(tag), [w.amount.micros() as u64, u64::from(w.account.get()), 0, 0]),
+        Command::SetLeverage(l) => (
+            Head { market: l.market.get(), x: l.leverage, ..Head::of(tag) },
+            [u64::from(l.account.get()), 0, 0, 0],
+        ),
+        Command::SetMark(m) => {
+            (Head { market: m.market.get(), ..Head::of(tag) }, [m.price.ticks() as u64, 0, 0, 0])
+        }
         Command::SetMarketParams(p) => market_params_fields(tag, &p),
         Command::SetRiskTier(r) => risk_tier_fields(tag, &r),
     };
@@ -217,30 +226,36 @@ pub fn encode_command(command: &Command) -> [u64; COMMAND_WORDS] {
 pub fn decode_command(words: &[u64; COMMAND_WORDS]) -> Result<Command, DecodeError> {
     let head = Head::unpack(words[0]);
     let [_, f1, f2, f3, f4] = *words;
-    let market = head.market;
+    let market = MarketId::new(head.market);
     let command = match head.tag {
         command_tags::PLACE_ORDER => Command::PlaceOrder(PlaceOrder {
-            order_id: f1,
-            price: f2 as i64,
-            qty: f3 as i64,
+            order_id: OrderId::new(f1),
+            price: Price::new(f2 as i64),
+            qty: Qty::new(f3 as i64),
             market,
             side: side_from_code(head.a)?,
             tif: tif_from_code(head.b)?,
             post_only: flag_from_code(head.c)?,
         }),
-        command_tags::CANCEL_ORDER => Command::CancelOrder(CancelOrder { order_id: f1, market }),
+        command_tags::CANCEL_ORDER => {
+            Command::CancelOrder(CancelOrder { order_id: OrderId::new(f1), market })
+        }
         command_tags::MODIFY_ORDER => Command::ModifyOrder(ModifyOrder {
-            order_id: f1,
-            new_price: f2 as i64,
-            new_size: f3 as i64,
+            order_id: OrderId::new(f1),
+            new_price: Price::new(f2 as i64),
+            new_size: Qty::new(f3 as i64),
             market,
         }),
-        command_tags::DEPOSIT => Command::Deposit(Deposit { amount: f1 as i64, account: f2 as u32 }),
-        command_tags::WITHDRAW => Command::Withdraw(Withdraw { amount: f1 as i64, account: f2 as u32 }),
-        command_tags::SET_LEVERAGE => {
-            Command::SetLeverage(SetLeverage { account: f1 as u32, market, leverage: head.x })
+        command_tags::DEPOSIT => {
+            Command::Deposit(Deposit { amount: Micros::new(f1 as i64), account: AccountId::new(f2 as u32) })
         }
-        command_tags::SET_MARK => Command::SetMark(SetMark { price: f1 as i64, market }),
+        command_tags::WITHDRAW => {
+            Command::Withdraw(Withdraw { amount: Micros::new(f1 as i64), account: AccountId::new(f2 as u32) })
+        }
+        command_tags::SET_LEVERAGE => {
+            Command::SetLeverage(SetLeverage { account: AccountId::new(f1 as u32), market, leverage: head.x })
+        }
+        command_tags::SET_MARK => Command::SetMark(SetMark { price: Price::new(f1 as i64), market }),
         command_tags::SET_MARKET_PARAMS => {
             Command::SetMarketParams(decode_market_params(head, [f1, f2, f3, f4]))
         }
@@ -257,10 +272,10 @@ pub fn decode_command(words: &[u64; COMMAND_WORDS]) -> Result<Command, DecodeErr
 /// `SetMarketParams`, as a command (tag 8) or as its echo event (tag 13): `x` the maximum
 /// leverage, f1 and f2 the price range, f3 the two fees, f4 the price band (a `u32`).
 fn market_params_fields(tag: u8, p: &SetMarketParams) -> (Head, [u64; 4]) {
-    let head = Head { market: p.market, x: p.max_leverage, ..Head::of(tag) };
+    let head = Head { market: p.market.get(), x: p.max_leverage, ..Head::of(tag) };
     let fields = [
-        p.min_price as u64,
-        p.max_price as u64,
+        p.min_price.ticks() as u64,
+        p.max_price.ticks() as u64,
         pack_fees(p.maker_fee_ppm, p.taker_fee_ppm),
         u64::from(p.price_band_ppm),
     ];
@@ -270,12 +285,12 @@ fn market_params_fields(tag: u8, p: &SetMarketParams) -> (Head, [u64; 4]) {
 fn decode_market_params(head: Head, fields: [u64; 4]) -> SetMarketParams {
     let (maker_fee_ppm, taker_fee_ppm) = unpack_fees(fields[2]);
     SetMarketParams {
-        min_price: fields[0] as i64,
-        max_price: fields[1] as i64,
+        min_price: Price::new(fields[0] as i64),
+        max_price: Price::new(fields[1] as i64),
         maker_fee_ppm,
         taker_fee_ppm,
         price_band_ppm: fields[3] as u32,
-        market: head.market,
+        market: MarketId::new(head.market),
         max_leverage: head.x,
     }
 }
@@ -283,14 +298,14 @@ fn decode_market_params(head: Head, fields: [u64; 4]) -> SetMarketParams {
 /// `SetRiskTier`, as a command (tag 9) or as its echo event (tag 14): `a` the row index,
 /// `b` the row count, `x` the maximum leverage, f1 the lower bound.
 fn risk_tier_fields(tag: u8, r: &SetRiskTier) -> (Head, [u64; 4]) {
-    let head = Head { a: r.index, b: r.count, market: r.market, x: r.max_leverage, ..Head::of(tag) };
-    (head, [r.lower_bound as u64, 0, 0, 0])
+    let head = Head { a: r.index, b: r.count, market: r.market.get(), x: r.max_leverage, ..Head::of(tag) };
+    (head, [r.lower_bound.micros() as u64, 0, 0, 0])
 }
 
 fn decode_risk_tier(head: Head, f1: u64) -> SetRiskTier {
     SetRiskTier {
-        lower_bound: f1 as i64,
-        market: head.market,
+        lower_bound: Micros::new(f1 as i64),
+        market: MarketId::new(head.market),
         max_leverage: head.x,
         index: head.a,
         count: head.b,
@@ -324,47 +339,65 @@ pub fn event_tag(event: &Event) -> u8 {
 pub fn encode_event(event: &Event) -> [u64; EVENT_WORDS] {
     let tag = event_tag(event);
     let (head, fields): (Head, [u64; 6]) = match *event {
-        Event::Ack(e) => (Head::of(tag), [e.order_id, 0, 0, 0, 0, 0]),
+        Event::Ack(e) => (Head::of(tag), [e.order_id.get(), 0, 0, 0, 0, 0]),
         Event::Reject(e) => (
             Head { a: reject_reason_code(e.reason), ..Head::of(tag) },
-            [e.order_id, u64::from(e.account), 0, 0, 0, 0],
+            [e.order_id.get(), u64::from(e.account.get()), 0, 0, 0, 0],
         ),
         Event::Fill(e) => (
-            Head { a: side_code(e.taker_side), market: e.market, ..Head::of(tag) },
+            Head { a: side_code(e.taker_side), market: e.market.get(), ..Head::of(tag) },
             [
-                e.maker_order,
-                e.taker_order,
-                e.price as u64,
-                e.qty as u64,
-                e.maker_fee as u64,
-                e.taker_fee as u64,
+                e.maker_order.get(),
+                e.taker_order.get(),
+                e.price.ticks() as u64,
+                e.qty.lots() as u64,
+                e.maker_fee.micros() as u64,
+                e.taker_fee.micros() as u64,
             ],
         ),
         Event::Cancelled(e) => (
-            Head { a: cancel_reason_code(e.reason), b: side_code(e.side), market: e.market, ..Head::of(tag) },
-            [e.order_id, e.remaining as u64, 0, 0, 0, 0],
+            Head {
+                a: cancel_reason_code(e.reason),
+                b: side_code(e.side),
+                market: e.market.get(),
+                ..Head::of(tag)
+            },
+            [e.order_id.get(), e.remaining.lots() as u64, 0, 0, 0, 0],
         ),
-        Event::Modified(e) => {
-            (Head { market: e.market, ..Head::of(tag) }, [e.order_id, e.price as u64, e.qty as u64, 0, 0, 0])
-        }
+        Event::Modified(e) => (
+            Head { market: e.market.get(), ..Head::of(tag) },
+            [e.order_id.get(), e.price.ticks() as u64, e.qty.lots() as u64, 0, 0, 0],
+        ),
         Event::PositionChanged(e) => (
-            Head { market: e.market, ..Head::of(tag) },
-            [e.position as u64, e.cost_basis as u64, e.locked as u64, u64::from(e.account), 0, 0],
+            Head { market: e.market.get(), ..Head::of(tag) },
+            [
+                e.position.lots() as u64,
+                e.cost_basis.micros() as u64,
+                e.locked.micros() as u64,
+                u64::from(e.account.get()),
+                0,
+                0,
+            ],
         ),
-        Event::BalanceChanged(e) => (Head::of(tag), [e.free as u64, u64::from(e.account), 0, 0, 0, 0]),
-        Event::MarkPrice(e) => (Head { market: e.market, ..Head::of(tag) }, [e.price as u64, 0, 0, 0, 0, 0]),
+        Event::BalanceChanged(e) => {
+            (Head::of(tag), [e.free.micros() as u64, u64::from(e.account.get()), 0, 0, 0, 0])
+        }
+        Event::MarkPrice(e) => {
+            (Head { market: e.market.get(), ..Head::of(tag) }, [e.price.ticks() as u64, 0, 0, 0, 0, 0])
+        }
         Event::Liquidation(e) => (
-            Head { market: e.market, ..Head::of(tag) },
-            [e.position as u64, u64::from(e.account), 0, 0, 0, 0],
+            Head { market: e.market.get(), ..Head::of(tag) },
+            [e.position.lots() as u64, u64::from(e.account.get()), 0, 0, 0, 0],
         ),
         Event::InsuranceAbsorb(e) => (
-            Head { market: e.market, ..Head::of(tag) },
-            [e.position as u64, e.cost_basis as u64, e.collateral as u64, 0, 0, 0],
+            Head { market: e.market.get(), ..Head::of(tag) },
+            [e.position.lots() as u64, e.cost_basis.micros() as u64, e.collateral.micros() as u64, 0, 0, 0],
         ),
-        Event::InsuranceShortfall(e) => (Head::of(tag), [e.uncovered as u64, 0, 0, 0, 0, 0]),
-        Event::LeverageSet(e) => {
-            (Head { market: e.market, x: e.leverage, ..Head::of(tag) }, [u64::from(e.account), 0, 0, 0, 0, 0])
-        }
+        Event::InsuranceShortfall(e) => (Head::of(tag), [e.uncovered.micros() as u64, 0, 0, 0, 0, 0]),
+        Event::LeverageSet(e) => (
+            Head { market: e.market.get(), x: e.leverage, ..Head::of(tag) },
+            [u64::from(e.account.get()), 0, 0, 0, 0, 0],
+        ),
         Event::MarketParamsSet(p) => with_six_fields(market_params_fields(tag, &p)),
         Event::RiskTierSet(r) => with_six_fields(risk_tier_fields(tag, &r)),
     };
@@ -381,61 +414,67 @@ fn with_six_fields((head, [f1, f2, f3, f4]): (Head, [u64; 4])) -> (Head, [u64; 6
 pub fn decode_event(words: &[u64; EVENT_WORDS]) -> Result<Event, DecodeError> {
     let head = Head::unpack(words[0]);
     let [_, f1, f2, f3, f4, f5, f6] = *words;
-    let market = head.market;
+    let market = MarketId::new(head.market);
     let event = match head.tag {
-        event_tags::ACK => Event::Ack(Ack { order_id: f1 }),
+        event_tags::ACK => Event::Ack(Ack { order_id: OrderId::new(f1) }),
         event_tags::REJECT => Event::Reject(Reject {
-            order_id: f1,
-            account: f2 as u32,
+            order_id: OrderId::new(f1),
+            account: AccountId::new(f2 as u32),
             reason: reject_reason_from_code(head.a)
                 .ok_or(DecodeError::BadCode { field: "reject reason", code: head.a })?,
         }),
         event_tags::FILL => Event::Fill(Fill {
-            maker_order: f1,
-            taker_order: f2,
-            price: f3 as i64,
-            qty: f4 as i64,
-            maker_fee: f5 as i64,
-            taker_fee: f6 as i64,
+            maker_order: OrderId::new(f1),
+            taker_order: OrderId::new(f2),
+            price: Price::new(f3 as i64),
+            qty: Qty::new(f4 as i64),
+            maker_fee: Micros::new(f5 as i64),
+            taker_fee: Micros::new(f6 as i64),
             market,
             taker_side: side_from_code(head.a)?,
         }),
         event_tags::CANCELLED => Event::Cancelled(Cancelled {
-            order_id: f1,
-            remaining: f2 as i64,
+            order_id: OrderId::new(f1),
+            remaining: Qty::new(f2 as i64),
             market,
             reason: cancel_reason_from_code(head.a)
                 .ok_or(DecodeError::BadCode { field: "cancel reason", code: head.a })?,
             side: side_from_code(head.b)?,
         }),
-        event_tags::MODIFIED => {
-            Event::Modified(Modified { order_id: f1, price: f2 as i64, qty: f3 as i64, market })
-        }
-        event_tags::POSITION_CHANGED => Event::PositionChanged(PositionChanged {
-            position: f1 as i64,
-            cost_basis: f2 as i64,
-            locked: f3 as i64,
-            account: f4 as u32,
+        event_tags::MODIFIED => Event::Modified(Modified {
+            order_id: OrderId::new(f1),
+            price: Price::new(f2 as i64),
+            qty: Qty::new(f3 as i64),
             market,
         }),
-        event_tags::BALANCE_CHANGED => {
-            Event::BalanceChanged(BalanceChanged { free: f1 as i64, account: f2 as u32 })
-        }
-        event_tags::MARK_PRICE => Event::MarkPrice(MarkPrice { price: f1 as i64, market }),
-        event_tags::LIQUIDATION => {
-            Event::Liquidation(Liquidation { position: f1 as i64, account: f2 as u32, market })
-        }
+        event_tags::POSITION_CHANGED => Event::PositionChanged(PositionChanged {
+            position: Qty::new(f1 as i64),
+            cost_basis: Micros::new(f2 as i64),
+            locked: Micros::new(f3 as i64),
+            account: AccountId::new(f4 as u32),
+            market,
+        }),
+        event_tags::BALANCE_CHANGED => Event::BalanceChanged(BalanceChanged {
+            free: Micros::new(f1 as i64),
+            account: AccountId::new(f2 as u32),
+        }),
+        event_tags::MARK_PRICE => Event::MarkPrice(MarkPrice { price: Price::new(f1 as i64), market }),
+        event_tags::LIQUIDATION => Event::Liquidation(Liquidation {
+            position: Qty::new(f1 as i64),
+            account: AccountId::new(f2 as u32),
+            market,
+        }),
         event_tags::INSURANCE_ABSORB => Event::InsuranceAbsorb(InsuranceAbsorb {
-            position: f1 as i64,
-            cost_basis: f2 as i64,
-            collateral: f3 as i64,
+            position: Qty::new(f1 as i64),
+            cost_basis: Micros::new(f2 as i64),
+            collateral: Micros::new(f3 as i64),
             market,
         }),
         event_tags::INSURANCE_SHORTFALL => {
-            Event::InsuranceShortfall(InsuranceShortfall { uncovered: f1 as i64 })
+            Event::InsuranceShortfall(InsuranceShortfall { uncovered: Micros::new(f1 as i64) })
         }
         event_tags::LEVERAGE_SET => {
-            Event::LeverageSet(LeverageSet { account: f1 as u32, market, leverage: head.x })
+            Event::LeverageSet(LeverageSet { account: AccountId::new(f1 as u32), market, leverage: head.x })
         }
         event_tags::MARKET_PARAMS_SET => Event::MarketParamsSet(decode_market_params(head, [f1, f2, f3, f4])),
         event_tags::RISK_TIER_SET => Event::RiskTierSet(decode_risk_tier(head, f1)),
@@ -591,7 +630,7 @@ pub fn from_le_bytes<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u64; W
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::types::order_id;
+    use engine::types::{OrderSeq, order_id};
 
     /// A tiny deterministic generator (xorshift64), so the randomized tests need no
     /// dependency and always run the same inputs.
@@ -651,29 +690,32 @@ mod tests {
         RejectReason::NoRiskTiers,
     ];
 
-    /// One of every command, with every 8-byte field set to `v`, every `u32` to `a`, every
-    /// market to `m`, every small `u16` to `x` and every `u8` to `u`; `k` picks the enums.
+    /// One of every command, with every 8-byte field set to `v` (as ticks, lots or micros
+    /// where the field has a unit), every `u32` to `a`, every market to `m`, every small `u16`
+    /// to `x` and every `u8` to `u`; `k` picks the enums.
     fn every_command(v: i64, a: u32, m: u16, x: u16, u: u8, k: usize) -> [Command; 9] {
+        let (price, qty, amount) = (Price::new(v), Qty::new(v), Micros::new(v));
+        let (id, account, market) = (OrderId::new(v as u64), AccountId::new(a), MarketId::new(m));
         [
             Command::PlaceOrder(PlaceOrder {
-                order_id: v as u64,
-                price: v,
-                qty: v,
-                market: m,
+                order_id: id,
+                price,
+                qty,
+                market,
                 side: SIDES[k % 2],
                 tif: TIFS[k / 2 % 2],
                 post_only: k / 4 % 2 == 1,
             }),
-            Command::CancelOrder(CancelOrder { order_id: v as u64, market: m }),
-            Command::ModifyOrder(ModifyOrder { order_id: v as u64, new_price: v, new_size: v, market: m }),
-            Command::Deposit(Deposit { amount: v, account: a }),
-            Command::Withdraw(Withdraw { amount: v, account: a }),
-            Command::SetLeverage(SetLeverage { account: a, market: m, leverage: x }),
-            Command::SetMark(SetMark { price: v, market: m }),
+            Command::CancelOrder(CancelOrder { order_id: id, market }),
+            Command::ModifyOrder(ModifyOrder { order_id: id, new_price: price, new_size: qty, market }),
+            Command::Deposit(Deposit { amount, account }),
+            Command::Withdraw(Withdraw { amount, account }),
+            Command::SetLeverage(SetLeverage { account, market, leverage: x }),
+            Command::SetMark(SetMark { price, market }),
             Command::SetMarketParams(market_params(v, a, m, x)),
             Command::SetRiskTier(SetRiskTier {
-                lower_bound: v,
-                market: m,
+                lower_bound: amount,
+                market,
                 max_leverage: x,
                 index: u,
                 count: u,
@@ -683,56 +725,63 @@ mod tests {
 
     fn market_params(v: i64, a: u32, m: u16, x: u16) -> SetMarketParams {
         SetMarketParams {
-            min_price: v,
-            max_price: v,
+            min_price: Price::new(v),
+            max_price: Price::new(v),
             maker_fee_ppm: a as i32,
             taker_fee_ppm: !a as i32,
             price_band_ppm: a,
-            market: m,
+            market: MarketId::new(m),
             max_leverage: x,
         }
     }
 
     /// One of every event, filled like [`every_command`].
     fn every_event(v: i64, a: u32, m: u16, x: u16, u: u8, k: usize) -> [Event; 14] {
+        let (price, qty, amount) = (Price::new(v), Qty::new(v), Micros::new(v));
+        let (id, account, market) = (OrderId::new(v as u64), AccountId::new(a), MarketId::new(m));
         [
-            Event::Ack(Ack { order_id: v as u64 }),
-            Event::Reject(Reject { order_id: v as u64, account: a, reason: REJECT_REASONS[k % 19] }),
+            Event::Ack(Ack { order_id: id }),
+            Event::Reject(Reject { order_id: id, account, reason: REJECT_REASONS[k % 19] }),
             Event::Fill(Fill {
-                maker_order: v as u64,
-                taker_order: !v as u64,
-                price: v,
-                qty: v,
-                maker_fee: v,
-                taker_fee: v,
-                market: m,
+                maker_order: id,
+                taker_order: OrderId::new(!v as u64),
+                price,
+                qty,
+                maker_fee: amount,
+                taker_fee: amount,
+                market,
                 taker_side: SIDES[k % 2],
             }),
             Event::Cancelled(Cancelled {
-                order_id: v as u64,
-                remaining: v,
-                market: m,
+                order_id: id,
+                remaining: qty,
+                market,
                 reason: CANCEL_REASONS[k % 6],
                 side: SIDES[k / 6 % 2],
             }),
-            Event::Modified(Modified { order_id: v as u64, price: v, qty: v, market: m }),
+            Event::Modified(Modified { order_id: id, price, qty, market }),
             Event::PositionChanged(PositionChanged {
-                position: v,
-                cost_basis: v,
-                locked: v,
-                account: a,
-                market: m,
+                position: qty,
+                cost_basis: amount,
+                locked: amount,
+                account,
+                market,
             }),
-            Event::BalanceChanged(BalanceChanged { free: v, account: a }),
-            Event::MarkPrice(MarkPrice { price: v, market: m }),
-            Event::Liquidation(Liquidation { position: v, account: a, market: m }),
-            Event::InsuranceAbsorb(InsuranceAbsorb { position: v, cost_basis: v, collateral: v, market: m }),
-            Event::InsuranceShortfall(InsuranceShortfall { uncovered: v }),
-            Event::LeverageSet(LeverageSet { account: a, market: m, leverage: x }),
+            Event::BalanceChanged(BalanceChanged { free: amount, account }),
+            Event::MarkPrice(MarkPrice { price, market }),
+            Event::Liquidation(Liquidation { position: qty, account, market }),
+            Event::InsuranceAbsorb(InsuranceAbsorb {
+                position: qty,
+                cost_basis: amount,
+                collateral: amount,
+                market,
+            }),
+            Event::InsuranceShortfall(InsuranceShortfall { uncovered: amount }),
+            Event::LeverageSet(LeverageSet { account, market, leverage: x }),
             Event::MarketParamsSet(market_params(v, a, m, x)),
             Event::RiskTierSet(SetRiskTier {
-                lower_bound: v,
-                market: m,
+                lower_bound: amount,
+                market,
                 max_leverage: x,
                 index: u,
                 count: u,
@@ -1023,10 +1072,10 @@ mod tests {
         // PIPELINE.md 5.6: account 9's post-only GTC bid on market 3, bytes 32..72 of the
         // signed message.
         let command = Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(9, 1),
-            price: 102_998,
-            qty: 500_000,
-            market: 3,
+            order_id: order_id(AccountId::new(9), OrderSeq::new(1)),
+            price: Price::new(102_998),
+            qty: Qty::new(500_000),
+            market: MarketId::new(3),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: true,
@@ -1038,7 +1087,7 @@ mod tests {
             0x20, 0xa1, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, // qty 500,000
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // f4 = 0
         ];
-        assert_eq!(order_id(9, 1), 38_654_705_665);
+        assert_eq!(order_id(AccountId::new(9), OrderSeq::new(1)), OrderId::new(38_654_705_665));
         assert_eq!(to_le_bytes::<COMMAND_WORDS, COMMAND_BYTES>(&encode_command(&command)), expected);
         assert_eq!(decode_command(&from_le_bytes(&expected)), Ok(command));
     }

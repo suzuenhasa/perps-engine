@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn markets_are_named_by_symbol_in_the_polymarket_flow() {
         let first = &POLYMARKET.markets[0];
-        assert_eq!(Flow::polymarket().market_label(first.id), first.symbol);
-        assert_eq!(Flow::m3().market_label(12), "market 12");
+        assert_eq!(Flow::polymarket().market_label(first.market_id()), first.symbol);
+        assert_eq!(Flow::m3().market_label(MarketId::new(12)), "market 12");
     }
 }

@@ -86,13 +86,20 @@ fn market_of(snapshot: &EngineSnapshot, market: MarketId) -> &MarketSnapshot {
 
 /// The account's slot, or the empty slot a first order is checked against.
 fn slot_of(market: &MarketSnapshot, account: AccountId) -> SlotSnapshot {
-    let empty =
-        SlotSnapshot { account, pos: 0, cost: 0, locked: 0, leverage: 1, open_buys: 0, open_sells: 0 };
+    let empty = SlotSnapshot {
+        account,
+        pos: Qty::ZERO,
+        cost: Micros::ZERO,
+        locked: Micros::ZERO,
+        leverage: 1,
+        open_buys: Qty::ZERO,
+        open_sells: Qty::ZERO,
+    };
     market.slots.iter().find(|s| s.account == account).copied().unwrap_or(empty)
 }
 
 fn free_of(snapshot: &EngineSnapshot, account: AccountId) -> Micros {
-    snapshot.accounts.iter().find(|a| a.account == account).map_or(0, |a| a.free)
+    snapshot.accounts.iter().find(|a| a.account == account).map_or(Micros::ZERO, |a| a.free)
 }
 
 fn resting_order(market: &MarketSnapshot, order_id: OrderId) -> RestingOrder {
@@ -112,7 +119,7 @@ fn check_fill_fees(before: &EngineSnapshot, events: &[Event]) {
             |rate: i32| ceil(i128::from(fill.price) * i128::from(fill.qty) * i128::from(rate), 1_000_000);
         assert_eq!(i128::from(fill.maker_fee), fee(params.maker_fee_ppm), "I14: maker fee of {fill:?}");
         assert_eq!(i128::from(fill.taker_fee), fee(params.taker_fee_ppm), "I14: taker fee of {fill:?}");
-        assert!(fill.maker_fee + fill.taker_fee >= 0, "I14: a fill's fees sum below 0: {fill:?}");
+        assert!(fill.maker_fee + fill.taker_fee >= Micros::ZERO, "I14: a fill's fees sum below 0: {fill:?}");
     }
 }
 
@@ -124,7 +131,8 @@ fn check_liquidated_slots_are_empty(after: &EngineSnapshot, events: &[Event]) {
         let market = market_of(after, market);
         let slot = slot_of(market, account);
         let values = (slot.pos, slot.cost, slot.locked, slot.open_buys, slot.open_sells);
-        assert_eq!(values, (0, 0, 0, 0, 0), "I12: account {account}'s liquidated slot is not empty");
+        let empty = (Qty::ZERO, Micros::ZERO, Micros::ZERO, Qty::ZERO, Qty::ZERO);
+        assert_eq!(values, empty, "I12: account {account}'s liquidated slot is not empty");
         let mut orders = market.book.bids.iter().chain(&market.book.asks);
         assert!(
             orders.all(|order| account_of(order.order_id) != account),
@@ -154,7 +162,7 @@ fn margined_size(before: &EngineSnapshot, command: &Command) -> Option<MarginedS
             let order = resting_order(market_of(before, modify.market), modify.order_id);
             let new_remaining = modify.new_size - order.filled;
             let decrease =
-                new_remaining <= 0 || (modify.new_price == order.price && new_remaining <= order.qty);
+                new_remaining <= Qty::ZERO || (modify.new_price == order.price && new_remaining <= order.qty);
             if decrease {
                 return None;
             }
@@ -284,7 +292,7 @@ fn withdrawal_sums(snapshot: &EngineSnapshot, account: AccountId) -> (i128, i128
     for market in &snapshot.markets {
         let Some(slot) = market.slots.iter().find(|s| s.account == account) else { continue };
         locked += i128::from(slot.locked);
-        if slot.pos != 0 {
+        if slot.pos != Qty::ZERO {
             open_notional += i128::from(slot.pos).abs() * i128::from(market.mark.expect("a mark"));
         }
     }

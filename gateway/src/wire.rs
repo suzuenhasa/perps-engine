@@ -175,7 +175,7 @@ pub fn encode_signed_part(
     bytes[VERSION_OFFSET..RESERVED_OFFSET].copy_from_slice(&VERSION.to_le_bytes());
     // Bytes 6..8 are reserved and stay 0.
     bytes[DEPLOYMENT_OFFSET..ACCOUNT_OFFSET].copy_from_slice(&deployment.to_le_bytes());
-    bytes[ACCOUNT_OFFSET..NONCE_OFFSET].copy_from_slice(&account.to_le_bytes());
+    bytes[ACCOUNT_OFFSET..NONCE_OFFSET].copy_from_slice(&account.get().to_le_bytes());
     bytes[NONCE_OFFSET..EXPIRY_OFFSET].copy_from_slice(&nonce.to_le_bytes());
     bytes[EXPIRY_OFFSET..COMMAND_OFFSET].copy_from_slice(&expires_at.to_le_bytes());
     let command: [u8; COMMAND_BYTES] = to_le_bytes(&encode_command(command));
@@ -233,7 +233,7 @@ pub fn decode(message: &[u8; MESSAGE_BYTES]) -> Result<Decoded, GatewayReject> {
     }
     Ok(Decoded {
         deployment: deployment_of(message),
-        account: u32::from_le_bytes(field(message, ACCOUNT_OFFSET)),
+        account: AccountId::new(u32::from_le_bytes(field(message, ACCOUNT_OFFSET))),
         nonce: u64::from_le_bytes(field(message, NONCE_OFFSET)),
         expires_at: u64::from_le_bytes(field(message, EXPIRY_OFFSET)),
         command,
@@ -289,7 +289,7 @@ pub fn encode_eip712(
     message[RECOVERY_ID_OFFSET] = recovery_id;
     // Byte 7 is reserved and stays 0.
     message[DEPLOYMENT_OFFSET..ACCOUNT_OFFSET].copy_from_slice(&deployment.to_le_bytes());
-    message[ACCOUNT_OFFSET..SALT_OFFSET].copy_from_slice(&account.to_le_bytes());
+    message[ACCOUNT_OFFSET..SALT_OFFSET].copy_from_slice(&account.get().to_le_bytes());
     message[SALT_OFFSET..TS_OFFSET].copy_from_slice(&salt.to_le_bytes());
     message[TS_OFFSET..COMMAND_OFFSET].copy_from_slice(&ts_ms.to_le_bytes());
     let command: [u8; COMMAND_BYTES] = to_le_bytes(&encode_command(command));
@@ -335,7 +335,7 @@ pub fn decode_eip712(message: &[u8; MESSAGE_BYTES]) -> Result<DecodedEip712, Gat
     }
     Ok(DecodedEip712 {
         deployment: deployment_of(message),
-        account: u32::from_le_bytes(field(message, ACCOUNT_OFFSET)),
+        account: AccountId::new(u32::from_le_bytes(field(message, ACCOUNT_OFFSET))),
         salt: u64::from_le_bytes(field(message, SALT_OFFSET)),
         ts_ms: u64::from_le_bytes(field(message, TS_OFFSET)),
         recovery_id,
@@ -411,9 +411,9 @@ fn field<const N: usize>(message: &[u8; MESSAGE_BYTES], offset: usize) -> [u8; N
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{self, VERIFIER, bytes, high_s_twin, public_key, signing_key};
+    use crate::test_support::{self, VERIFIER, acct, bytes, high_s_twin, public_key, signing_key};
     use engine::command::{CancelOrder, Deposit, ModifyOrder, PlaceOrder, SetMark};
-    use engine::types::{Side, TimeInForce, order_id};
+    use engine::types::{MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, account_of, order_id};
     use k256::ecdsa::signature::Signer;
     use k256::ecdsa::{Signature, SigningKey};
     use k256::sha2::{Digest, Sha256};
@@ -428,10 +428,10 @@ mod tests {
 
     fn example_place() -> Command {
         Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(9, 1),
-            price: 102_998,
-            qty: 500_000,
-            market: 3,
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            price: Price::new(102_998),
+            qty: Qty::new(500_000),
+            market: MarketId::new(3),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: true,
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn the_worked_example_encodes_to_the_specs_bytes() {
-        let signed = encode_signed_part(1, 9, 1, EXAMPLE_EXPIRY, &example_place());
+        let signed = encode_signed_part(1, acct(9), 1, EXAMPLE_EXPIRY, &example_place());
         assert_eq!(signed[..], bytes(EXAMPLE)[..]);
     }
 
@@ -452,12 +452,12 @@ mod tests {
     /// (`test_support::VERIFIER`).
     #[test]
     fn the_worked_example_signs_to_the_specs_signature() {
-        let key = test_support::signing_key(1, 9);
+        let key = test_support::signing_key(1, acct(9));
         assert_eq!(key.to_bytes()[..], bytes(test_support::ACCOUNT_9_PRIVATE_KEY)[..]);
         let public = key.verifying_key().to_sec1_point(true);
         assert_eq!(public.as_bytes(), &bytes(test_support::ACCOUNT_9_PUBLIC_KEY)[..]);
 
-        let signed = encode_signed_part(1, 9, 1, EXAMPLE_EXPIRY, &example_place());
+        let signed = encode_signed_part(1, acct(9), 1, EXAMPLE_EXPIRY, &example_place());
         let digest = Sha256::digest(signed);
         assert_eq!(digest[..], bytes("1b3977db461c6b73508894a9d1075fbb2ff90a9c6013d18a1718138390a8f19d")[..]);
 
@@ -496,24 +496,27 @@ mod tests {
     fn place_cancel_and_modify_encode_then_decode() {
         let commands = [
             example_place(),
-            Command::CancelOrder(CancelOrder { order_id: order_id(9, 17), market: 3 }),
+            Command::CancelOrder(CancelOrder {
+                order_id: order_id(acct(9), OrderSeq::new(17)),
+                market: MarketId::new(3),
+            }),
             Command::ModifyOrder(ModifyOrder {
-                order_id: order_id(9, 17),
-                new_price: 103_001,
-                new_size: 250_000,
-                market: 3,
+                order_id: order_id(acct(9), OrderSeq::new(17)),
+                new_price: Price::new(103_001),
+                new_size: Qty::new(250_000),
+                market: MarketId::new(3),
             }),
         ];
         for (nonce, command) in commands.iter().enumerate() {
             let nonce = nonce as u64 + 41;
-            let signed = encode_signed_part(7, 9, nonce, u64::MAX, command);
+            let signed = encode_signed_part(7, acct(9), nonce, u64::MAX, command);
             let message = assemble(&signed, &[0x11; SIGNATURE_BYTES]);
             let decoded = decode(&message).expect("decodes");
             assert_eq!(
                 decoded,
-                Decoded { deployment: 7, account: 9, nonce, expires_at: u64::MAX, command: *command }
+                Decoded { deployment: 7, account: acct(9), nonce, expires_at: u64::MAX, command: *command }
             );
-            assert_eq!(decoded.order_id() >> 32, 9);
+            assert_eq!(account_of(decoded.order_id()), acct(9));
             assert_eq!(signed_part(&message), &signed);
             assert_eq!(signature(&message), &[0x11; SIGNATURE_BYTES]);
             assert_eq!(deployment_of(&message), 7);
@@ -524,7 +527,7 @@ mod tests {
 
     #[test]
     fn decode_refuses_a_foreign_domain_bad_bytes_and_operator_commands() {
-        let good = assemble(&encode_signed_part(1, 9, 1, u64::MAX, &example_place()), &[1; 64]);
+        let good = assemble(&encode_signed_part(1, acct(9), 1, u64::MAX, &example_place()), &[1; 64]);
         let with = |offset: usize, value: u8| {
             let mut message = good;
             message[offset] = value;
@@ -538,10 +541,10 @@ mod tests {
         assert_eq!(decode(&with(COMMAND_OFFSET + 1, 2)), Err(GatewayReject::Malformed), "side 2");
         assert_eq!(decode(&with(COMMAND_OFFSET + 32, 1)), Err(GatewayReject::Malformed), "f4 != 0");
         for operator in [
-            Command::Deposit(Deposit { amount: 1, account: 9 }),
-            Command::SetMark(SetMark { price: 1, market: 3 }),
+            Command::Deposit(Deposit { amount: Micros::new(1), account: acct(9) }),
+            Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(3) }),
         ] {
-            let message = assemble(&encode_signed_part(1, 9, 1, u64::MAX, &operator), &[1; 64]);
+            let message = assemble(&encode_signed_part(1, acct(9), 1, u64::MAX, &operator), &[1; 64]);
             assert_eq!(decode(&message), Err(GatewayReject::OperatorOnly));
         }
         // The deployment is not decode's to judge: the gateway compares it with its own.
@@ -550,9 +553,9 @@ mod tests {
 
     #[test]
     fn a_signature_by_another_key_or_over_other_bytes_is_bad() {
-        let key = test_support::signing_key(1, 9);
+        let key = test_support::signing_key(1, acct(9));
         let other = SigningKey::from_slice(&[7; 32]).expect("a valid scalar");
-        let signed = encode_signed_part(1, 9, 1, u64::MAX, &example_place());
+        let signed = encode_signed_part(1, acct(9), 1, u64::MAX, &example_place());
         let by_other: Signature = other.sign(&signed);
         let by_other: [u8; 64] = by_other.normalize_s().to_bytes().into();
         assert_eq!(verify_signature(&public_key(&key), &signed, &by_other), Err(GatewayReject::BadSignature));
@@ -569,22 +572,25 @@ mod tests {
     const TS: u64 = 1_790_000_000_123;
 
     fn example_cancel() -> Command {
-        Command::CancelOrder(CancelOrder { order_id: order_id(9, 17), market: 3 })
+        Command::CancelOrder(CancelOrder {
+            order_id: order_id(acct(9), OrderSeq::new(17)),
+            market: MarketId::new(3),
+        })
     }
 
     fn example_modify() -> Command {
         Command::ModifyOrder(ModifyOrder {
-            order_id: order_id(9, 17),
-            new_price: 103_001,
-            new_size: 250_000,
-            market: 3,
+            order_id: order_id(acct(9), OrderSeq::new(17)),
+            new_price: Price::new(103_001),
+            new_size: Qty::new(250_000),
+            market: MarketId::new(3),
         })
     }
 
     #[test]
     fn an_eip712_message_has_the_layout_of_the_module_docs() {
         let salt = 0x0102_0304_0506_0708;
-        let message = encode_eip712(7, 9, salt, TS, &example_place(), &[0x11; SIGNATURE_BYTES], 1);
+        let message = encode_eip712(7, acct(9), salt, TS, &example_place(), &[0x11; SIGNATURE_BYTES], 1);
         assert_eq!(&message[0..4], b"PERP");
         assert_eq!(message[4..6], [2, 0], "version 2, little-endian");
         assert_eq!(message[6], 1, "the recovery id");
@@ -602,25 +608,26 @@ mod tests {
         for (i, command) in [example_place(), example_cancel(), example_modify()].iter().enumerate() {
             for recovery_id in [0, 1] {
                 let salt = u64::MAX - i as u64;
-                let message = encode_eip712(7, 9, salt, TS + i as u64, command, &[0x22; 64], recovery_id);
+                let message =
+                    encode_eip712(7, acct(9), salt, TS + i as u64, command, &[0x22; 64], recovery_id);
                 let decoded = decode_eip712(&message).expect("decodes");
                 let expected = DecodedEip712 {
                     deployment: 7,
-                    account: 9,
+                    account: acct(9),
                     salt,
                     ts_ms: TS + i as u64,
                     recovery_id,
                     command: *command,
                 };
                 assert_eq!(decoded, expected);
-                assert_eq!(decoded.order_id() >> 32, 9);
+                assert_eq!(account_of(decoded.order_id()), acct(9));
             }
         }
     }
 
     #[test]
     fn decode_eip712_refuses_another_version_bad_bytes_bad_ids_and_operator_commands() {
-        let good = encode_eip712(1, 9, 1, TS, &example_place(), &[1; 64], 0);
+        let good = encode_eip712(1, acct(9), 1, TS, &example_place(), &[1; 64], 0);
         let with = |offset: usize, value: u8| {
             let mut message = good;
             message[offset] = value;
@@ -647,14 +654,14 @@ mod tests {
         assert_eq!(decode_eip712(&with(COMMAND_OFFSET, 0)), Err(GatewayReject::Malformed), "tag 0");
         assert_eq!(decode_eip712(&with(COMMAND_OFFSET + 1, 2)), Err(GatewayReject::Malformed), "side 2");
         for operator in [
-            Command::Deposit(Deposit { amount: 1, account: 9 }),
-            Command::SetMark(SetMark { price: 1, market: 3 }),
+            Command::Deposit(Deposit { amount: Micros::new(1), account: acct(9) }),
+            Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(3) }),
         ] {
-            let message = encode_eip712(1, 9, 1, TS, &operator, &[1; 64], 0);
+            let message = encode_eip712(1, acct(9), 1, TS, &operator, &[1; 64], 0);
             assert_eq!(decode_eip712(&message), Err(GatewayReject::OperatorOnly));
         }
         // Each scheme refuses the other's version.
-        let version_1 = assemble(&encode_signed_part(1, 9, 1, u64::MAX, &example_place()), &[1; 64]);
+        let version_1 = assemble(&encode_signed_part(1, acct(9), 1, u64::MAX, &example_place()), &[1; 64]);
         assert_eq!(decode_eip712(&version_1), Err(GatewayReject::WrongDomain));
         assert_eq!(decode(&good), Err(GatewayReject::WrongDomain));
         // The deployment is not decode's to judge: the gateway compares it with its own.
@@ -663,12 +670,12 @@ mod tests {
 
     #[test]
     fn a_signed_eip712_message_recovers_to_its_signer_and_to_nobody_else() {
-        let key = signing_key(1, 9);
+        let key = signing_key(1, acct(9));
         let address = public_key(&key).address();
         let domain = Domain::new(1);
-        let message = sign_eip712(&key, &domain, 9, 42, TS, &example_place());
+        let message = sign_eip712(&key, &domain, acct(9), 42, TS, &example_place());
         let decoded = decode_eip712(&message).expect("decodes");
-        assert_eq!((decoded.deployment, decoded.account, decoded.salt, decoded.ts_ms), (1, 9, 42, TS));
+        assert_eq!((decoded.deployment, decoded.account, decoded.salt, decoded.ts_ms), (1, acct(9), 42, TS));
         let data = eip712::op_data(&example_place()).expect("a place has a form");
         assert_eq!(decoded.digest(&domain), eip712::digest(&domain, &data, 42, TS), "eip712.rs's digest");
         let genuine = signature(&message);
@@ -677,7 +684,7 @@ mod tests {
         // Any other digest or id recovers *some* key, not the signer's: another account's
         // address, another deployment (the domain), another salt, timestamp or command, the
         // other recovery id.
-        let other = public_key(&signing_key(1, 10)).address();
+        let other = public_key(&signing_key(1, acct(10))).address();
         assert_eq!(
             check_signer(VERIFIER, &domain, &decoded, genuine, &other),
             Err(GatewayReject::WrongSigner)
@@ -714,7 +721,7 @@ mod tests {
         // The audit's check: the registered key over the digest, without the recovery id.
         let digest = decoded.digest(&domain);
         assert_eq!(verify_digest(&public_key(&key), &digest, genuine), Ok(()));
-        let key_10 = public_key(&signing_key(1, 10));
+        let key_10 = public_key(&signing_key(1, acct(10)));
         assert_eq!(verify_digest(&key_10, &digest, genuine), Err(GatewayReject::BadSignature));
         assert_eq!(verify_digest(&public_key(&key), &digest, &twin), Err(GatewayReject::HighS));
     }

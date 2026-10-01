@@ -139,10 +139,10 @@ pub fn encode_op<'a>(command: &Command, buffer: &'a mut [u8; MAX_OP_BYTES]) -> O
             op.str(b"createOrders");
             op.array(1); // one order
             op.array(7); // [iid, buy, p, qty, tif, po, c]
-            op.uint(u64::from(place.market));
+            op.uint(u64::from(place.market.get()));
             op.bool(place.side == Side::Buy);
-            op.str(Decimal::new(place.price, PRICE_DECIMALS).as_bytes());
-            op.str(Decimal::new(place.qty, QTY_DECIMALS).as_bytes());
+            op.str(Decimal::new(place.price.ticks(), PRICE_DECIMALS).as_bytes());
+            op.str(Decimal::new(place.qty.lots(), QTY_DECIMALS).as_bytes());
             op.str(match place.tif {
                 TimeInForce::Gtc => b"gtc",
                 TimeInForce::Ioc => b"ioc",
@@ -162,8 +162,8 @@ pub fn encode_op<'a>(command: &Command, buffer: &'a mut [u8; MAX_OP_BYTES]) -> O
             op.array(1); // one modify
             op.array(3); // [c, p, qty]
             op.str(&order_id_hex(modify.order_id));
-            op.str(Decimal::new(modify.new_price, PRICE_DECIMALS).as_bytes());
-            op.str(Decimal::new(modify.new_size, QTY_DECIMALS).as_bytes());
+            op.str(Decimal::new(modify.new_price.ticks(), PRICE_DECIMALS).as_bytes());
+            op.str(Decimal::new(modify.new_size.lots(), QTY_DECIMALS).as_bytes());
         }
         Command::Deposit(_)
         | Command::Withdraw(_)
@@ -220,7 +220,7 @@ fn order_id_hex(order_id: OrderId) -> [u8; 32] {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut hex = [b'0'; 32];
     for (i, digit) in hex[16..].iter_mut().enumerate() {
-        let nibble = (order_id >> (60 - 4 * i)) & 0xF;
+        let nibble = (order_id.get() >> (60 - 4 * i)) & 0xF;
         *digit = DIGITS[nibble as usize];
     }
     hex
@@ -288,10 +288,10 @@ impl Decimal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::bytes;
+    use crate::test_support::{acct, bytes};
     use crate::verifier::{PublicKey, VerifierKind, sign_recoverable};
     use engine::command::{CancelOrder, Deposit, ModifyOrder, PlaceOrder, SetMark};
-    use engine::types::order_id;
+    use engine::types::{MarketId, Micros, OrderSeq, Price, Qty, order_id};
     use k256::ecdsa::SigningKey;
 
     /// The bytes of hex text, with or without a leading `0x`, white space ignored.
@@ -817,9 +817,9 @@ mod tests {
 
     #[test]
     fn an_order_id_is_32_lowercase_hex_digits() {
-        assert_eq!(&order_id_hex(order_id(9, 1)), b"00000000000000000000000900000001");
-        assert_eq!(&order_id_hex(0x0123_4567_89AB_CDEF), b"00000000000000000123456789abcdef");
-        assert_eq!(&order_id_hex(u64::MAX), b"0000000000000000ffffffffffffffff");
+        assert_eq!(&order_id_hex(order_id(acct(9), OrderSeq::new(1))), b"00000000000000000000000900000001");
+        assert_eq!(&order_id_hex(OrderId::new(0x0123_4567_89AB_CDEF)), b"00000000000000000123456789abcdef");
+        assert_eq!(&order_id_hex(OrderId::new(u64::MAX)), b"0000000000000000ffffffffffffffff");
     }
 
     #[test]
@@ -830,10 +830,10 @@ mod tests {
         let golden_1 = hex("92 ac 6372656174654f7264657273 91 96 01 c3 a3 302e35 a2 3130 a3 677463 c2");
         assert_eq!(keccak256(&golden_1)[..], hex(golden_op_vectors()[0].data));
         let place = Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(9, 1),
-            price: 50,
-            qty: 100_000,
-            market: 1,
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            price: Price::new(50),
+            qty: Qty::new(100_000),
+            market: MarketId::new(1),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: false,
@@ -854,10 +854,10 @@ mod tests {
         // A post-only IOC sell on market 300 (whether an order makes sense is the engine's
         // business; the form only spells it).
         let place = Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(0x0102_0304, 0xA0B0_C0D0),
-            price: 102_998,
-            qty: 500_000,
-            market: 300,
+            order_id: order_id(acct(0x0102_0304), OrderSeq::new(0xA0B0_C0D0)),
+            price: Price::new(102_998),
+            qty: Qty::new(500_000),
+            market: MarketId::new(300),
             side: Side::Sell,
             tif: TimeInForce::Ioc,
             post_only: true,
@@ -881,7 +881,10 @@ mod tests {
 
     #[test]
     fn a_cancel_is_golden_vector_5_with_our_order_id() {
-        let cancel = Command::CancelOrder(CancelOrder { order_id: order_id(9, 1), market: 3 });
+        let cancel = Command::CancelOrder(CancelOrder {
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            market: MarketId::new(3),
+        });
         let mut expected = hex("92 b0");
         expected.extend_from_slice(b"cancelOrdersCOID");
         expected.extend_from_slice(&[0x91, 0xD9, 0x20]);
@@ -894,17 +897,20 @@ mod tests {
         golden_5[expected.len() - 32..].copy_from_slice(b"aabbccddeeff00112233445566778899");
         assert_eq!(keccak256(&golden_5)[..], hex(golden_op_vectors()[4].data));
         // The market is not signed (module docs).
-        let elsewhere = Command::CancelOrder(CancelOrder { order_id: order_id(9, 1), market: 7 });
+        let elsewhere = Command::CancelOrder(CancelOrder {
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            market: MarketId::new(7),
+        });
         assert_eq!(op_data(&elsewhere), op_data(&cancel));
     }
 
     #[test]
     fn a_modify_names_the_order_and_its_new_price_and_total_size() {
         let modify = Command::ModifyOrder(ModifyOrder {
-            order_id: order_id(9, 1),
-            new_price: 103_001,
-            new_size: 250_000,
-            market: 3,
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            new_price: Price::new(103_001),
+            new_size: Qty::new(250_000),
+            market: MarketId::new(3),
         });
         let mut expected = hex("92 b0");
         expected.extend_from_slice(b"modifyOrdersCOID");
@@ -917,10 +923,10 @@ mod tests {
         let mut buffer = [0; MAX_OP_BYTES];
         assert_eq!(encode_op(&modify, &mut buffer), Some(&expected[..]));
         let elsewhere = Command::ModifyOrder(ModifyOrder {
-            order_id: order_id(9, 1),
-            new_price: 103_001,
-            new_size: 250_000,
-            market: 4,
+            order_id: order_id(acct(9), OrderSeq::new(1)),
+            new_price: Price::new(103_001),
+            new_size: Qty::new(250_000),
+            market: MarketId::new(4),
         });
         assert_eq!(op_data(&elsewhere), op_data(&modify), "the market is not signed");
     }
@@ -928,10 +934,10 @@ mod tests {
     #[test]
     fn the_longest_form_fills_max_op_bytes_exactly() {
         let longest = Command::PlaceOrder(PlaceOrder {
-            order_id: u64::MAX,
-            price: i64::MIN,
-            qty: i64::MIN,
-            market: u16::MAX,
+            order_id: OrderId::new(u64::MAX),
+            price: Price::new(i64::MIN),
+            qty: Qty::new(i64::MIN),
+            market: MarketId::new(u16::MAX),
             side: Side::Sell,
             tif: TimeInForce::Gtc,
             post_only: true,
@@ -939,10 +945,10 @@ mod tests {
         let mut buffer = [0; MAX_OP_BYTES];
         assert_eq!(encode_op(&longest, &mut buffer).map(<[u8]>::len), Some(MAX_OP_BYTES));
         let modify = Command::ModifyOrder(ModifyOrder {
-            order_id: u64::MAX,
-            new_price: i64::MIN,
-            new_size: i64::MIN,
-            market: u16::MAX,
+            order_id: OrderId::new(u64::MAX),
+            new_price: Price::new(i64::MIN),
+            new_size: Qty::new(i64::MIN),
+            market: MarketId::new(u16::MAX),
         });
         assert!(encode_op(&modify, &mut buffer).is_some_and(|op| op.len() < MAX_OP_BYTES));
     }
@@ -950,8 +956,8 @@ mod tests {
     #[test]
     fn operator_commands_have_no_form() {
         for operator in [
-            Command::Deposit(Deposit { amount: 1, account: 9 }),
-            Command::SetMark(SetMark { price: 1, market: 3 }),
+            Command::Deposit(Deposit { amount: Micros::new(1), account: acct(9) }),
+            Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(3) }),
         ] {
             let mut buffer = [0; MAX_OP_BYTES];
             assert_eq!(encode_op(&operator, &mut buffer), None);

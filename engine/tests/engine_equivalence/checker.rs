@@ -27,7 +27,7 @@ use engine::command::Command;
 use engine::engine::{EngineSnapshot, MarketSnapshot, SlotSnapshot};
 use engine::event::{CancelReason, Event, RejectReason};
 use engine::money::Tier;
-use engine::types::{AccountId, Price, Qty, Side, account_of};
+use engine::types::{AccountId, Micros, OrderId, Price, Qty, Side, account_of};
 
 use super::shadow_ledger::{BlockKind, split_into_blocks};
 use super::state::{free_of, market_of, resting_order, resting_orders, slot_of};
@@ -89,7 +89,7 @@ pub fn withdrawal_sums(state: &EngineSnapshot, account: AccountId) -> (i128, i12
     for market in &state.markets {
         let slot = slot_of(market, account);
         locked += i128::from(slot.locked);
-        if slot.pos != 0 {
+        if slot.pos != Qty::ZERO {
             open_notional +=
                 i128::from(slot.pos).abs() * i128::from(market.mark.expect("a position has a mark"));
         }
@@ -122,12 +122,12 @@ pub fn margin_request(before: &EngineSnapshot, command: &Command) -> Option<Marg
         Command::ModifyOrder(m) => {
             let order = resting_order(before, m.market, m.order_id)?;
             let new_remaining = m.new_size - order.filled;
-            if new_remaining <= 0 || (m.new_price == order.price && new_remaining <= order.qty) {
+            if new_remaining <= Qty::ZERO || (m.new_price == order.price && new_remaining <= order.qty) {
                 return None;
             }
             (m.market, account_of(m.order_id), Some(order.side), new_remaining - order.qty, None)
         }
-        Command::SetLeverage(l) => (l.market, l.account, None, 0, Some(l.leverage)),
+        Command::SetLeverage(l) => (l.market, l.account, None, Qty::ZERO, Some(l.leverage)),
         _ => return None,
     };
     let market = market_of(before, market_id)?;
@@ -177,10 +177,12 @@ fn check_reject_fields(command: &Command, events: &[Event]) {
         Command::PlaceOrder(o) => (o.order_id, account_of(o.order_id)),
         Command::CancelOrder(c) => (c.order_id, account_of(c.order_id)),
         Command::ModifyOrder(m) => (m.order_id, account_of(m.order_id)),
-        Command::Deposit(d) => (0, d.account),
-        Command::Withdraw(w) => (0, w.account),
-        Command::SetLeverage(l) => (0, l.account),
-        Command::SetMark(_) | Command::SetMarketParams(_) | Command::SetRiskTier(_) => (0, AccountId::MAX),
+        Command::Deposit(d) => (OrderId::new(0), d.account),
+        Command::Withdraw(w) => (OrderId::new(0), w.account),
+        Command::SetLeverage(l) => (OrderId::new(0), l.account),
+        Command::SetMark(_) | Command::SetMarketParams(_) | Command::SetRiskTier(_) => {
+            (OrderId::new(0), AccountId::MAX)
+        }
     };
     assert_eq!((reject.order_id, reject.account), expected, "RISK.md 6: the Reject of {command:?}");
 }
@@ -311,13 +313,14 @@ fn check_fills_and_liquidations(before: &EngineSnapshot, events: &[Event], after
                 let fee = |rate: i32| ceil_div(notional * i128::from(rate), 1_000_000);
                 assert_eq!(i128::from(fill.maker_fee), fee(params.maker_fee_ppm), "I14: {fill:?}");
                 assert_eq!(i128::from(fill.taker_fee), fee(params.taker_fee_ppm), "I14: {fill:?}");
-                assert!(fill.maker_fee + fill.taker_fee >= 0, "I14: {fill:?}'s fees sum below 0");
+                assert!(fill.maker_fee + fill.taker_fee >= Micros::ZERO, "I14: {fill:?}'s fees sum below 0");
             }
             Event::Liquidation(liquidation) => {
                 let market = market_of(after, liquidation.market).expect("a liquidation is in a market");
                 let slot = slot_of(market, liquidation.account);
                 let values = (slot.pos, slot.cost, slot.locked, slot.open_buys, slot.open_sells);
-                assert_eq!(values, (0, 0, 0, 0, 0), "I12: {liquidation:?} left the slot non-empty");
+                let empty = (Qty::ZERO, Micros::ZERO, Micros::ZERO, Qty::ZERO, Qty::ZERO);
+                assert_eq!(values, empty, "I12: {liquidation:?} left the slot non-empty");
                 let none_left =
                     resting_orders(market).all(|order| account_of(order.order_id) != liquidation.account);
                 assert!(none_left, "I12: {liquidation:?} left orders resting");

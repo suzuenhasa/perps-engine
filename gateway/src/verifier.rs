@@ -339,7 +339,9 @@ fn k256_uncompressed(key: &VerifyingKey) -> [u8; 65] {
 mod tests {
     use super::*;
     use crate::keccak::keccak256;
-    use crate::test_support::{ACCOUNT_9_PUBLIC_KEY, VERIFIER, bytes, high_s_twin, public_key, signing_key};
+    use crate::test_support::{
+        ACCOUNT_9_PUBLIC_KEY, VERIFIER, acct, bytes, high_s_twin, public_key, signing_key,
+    };
 
     #[test]
     fn names_round_trip_and_an_unknown_name_is_refused() {
@@ -370,7 +372,7 @@ mod tests {
         let key = PublicKey::from_compressed(VERIFIER, &compressed).expect("a point");
         assert_eq!(key.to_compressed(), compressed);
         assert_eq!(key.verifier(), VERIFIER);
-        assert_eq!(key, public_key(&signing_key(1, 9)));
+        assert_eq!(key, public_key(&signing_key(1, acct(9))));
         let mut off_curve = [0; KEY_BYTES];
         off_curve[0] = 2;
         off_curve[KEY_BYTES - 1] = 5; // x = 5: 5^3 + 7 = 132 is not a square modulo p
@@ -379,7 +381,7 @@ mod tests {
 
     #[test]
     fn recovery_finds_the_signer_and_refuses_bad_ids_high_s_and_zeros() {
-        let key = signing_key(1, 9);
+        let key = signing_key(1, acct(9));
         let address = public_key(&key).address();
         assert_eq!(address, PublicKey::K256(*key.verifying_key()).address());
         let digest = keccak256(b"any 32 bytes");
@@ -428,12 +430,12 @@ mod tests {
     #[test]
     fn a_signature_over_a_digest_verifies_with_the_signers_key_only() {
         // The audit's check in the EIP-712 scheme: the registered key, and no recovery id.
-        let key = signing_key(1, 9);
+        let key = signing_key(1, acct(9));
         let digest = keccak256(b"any 32 bytes");
         let (signature, _) = sign_recoverable(&key, &digest);
         assert!(public_key(&key).verifies_digest(&digest, &signature));
         assert!(!public_key(&key).verifies_digest(&keccak256(b"other bytes"), &signature), "another digest");
-        assert!(!public_key(&signing_key(1, 10)).verifies_digest(&digest, &signature), "another key");
+        assert!(!public_key(&signing_key(1, acct(10))).verifies_digest(&digest, &signature), "another key");
         assert!(!public_key(&key).verifies_digest(&digest, &high_s_twin(&signature)), "the high-S twin");
         let mut zero_r = signature;
         zero_r[..32].fill(0);
@@ -448,7 +450,7 @@ mod cross_check {
     use super::*;
     use crate::keccak::keccak256;
     use crate::test_support::{
-        ACCOUNT_9_PUBLIC_KEY, XorShift, bytes, cancel, high_s_twin, modify, place, signing_key,
+        ACCOUNT_9_PUBLIC_KEY, XorShift, acct, bytes, cancel, high_s_twin, modify, place, signing_key,
     };
     use crate::wire::{ORDER, encode_signed_part};
     use engine::command::Command;
@@ -492,8 +494,9 @@ mod cross_check {
     fn both_accept_what_k256_signs_and_refuse_the_same_edits() {
         let mut random = XorShift(0xC055_C4EC);
         let mut cases = 0;
-        for account in 1..=40u32 {
-            let key = signing_key(1 + u64::from(account % 3), account);
+        for n in 1..=40u32 {
+            let account = acct(n);
+            let key = signing_key(1 + u64::from(n % 3), account);
             let keys = both(&key);
             let other = both(&signing_key(99, account));
             for sequence in 0..6u32 {
@@ -533,9 +536,9 @@ mod cross_check {
 
     #[test]
     fn both_refuse_r_or_s_of_zero_or_at_least_n() {
-        let key = signing_key(1, 9);
+        let key = signing_key(1, acct(9));
         let keys = both(&key);
-        let signed = encode_signed_part(1, 9, 1, u64::MAX, &place(9, 1));
+        let signed = encode_signed_part(1, acct(9), 1, u64::MAX, &place(acct(9), 1));
         let genuine = sign(&key, &signed);
         assert_eq!(answers(&keys, &signed, &genuine), [true, true], "so each refusal below is the edit's");
         let mut n_plus_1 = ORDER;
@@ -591,8 +594,9 @@ mod cross_check {
     fn both_recover_the_same_signer_and_refuse_the_same_edits() {
         let mut random = XorShift(0x5EC0_4E4C);
         let mut cases = 0;
-        for account in 1..=40u32 {
-            let key = signing_key(1 + u64::from(account % 3), account);
+        for n in 1..=40u32 {
+            let account = acct(n);
+            let key = signing_key(1 + u64::from(n % 3), account);
             let [k256, libsecp] = both(&key);
             let address = k256.address();
             assert_eq!(libsecp.address(), address, "account {account}");
@@ -649,7 +653,7 @@ mod cross_check {
 
     #[test]
     fn both_refuse_to_recover_from_r_or_s_of_zero_or_at_least_n() {
-        let key = signing_key(1, 9);
+        let key = signing_key(1, acct(9));
         let digest = keccak256(b"a digest");
         let (genuine, id) = sign_recoverable(&key, &digest);
         let address = both(&key)[0].address();
@@ -675,7 +679,7 @@ mod cross_check {
 
     #[test]
     fn both_parse_the_same_keys_and_refuse_the_same_bytes() {
-        for account in 1..=20 {
+        for account in (1..=20).map(acct) {
             let [k256, libsecp] = both(&signing_key(1, account));
             assert_eq!(k256.to_compressed(), libsecp.to_compressed(), "account {account}");
             assert_eq!(

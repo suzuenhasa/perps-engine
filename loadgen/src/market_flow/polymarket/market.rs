@@ -28,7 +28,9 @@
 //! **Prices.** Polymarket's grid has 5 significant figures (`profile.rs`): a *real tick* is
 //! `10^max(0, digits − 5)` engine ticks ([`real_tick`]). Spreads, gaps and moves are counted
 //! in real ticks of the fair value, and every price is rounded onto its own grid away from
-//! the fair value; the two differ only near a power of ten.
+//! the fair value; the two differ only near a power of ten. A price, and a distance between
+//! prices, is a `Price` (engine ticks); a count of real ticks is a bare `i64`, turned into
+//! engine ticks by [`ticks_of`] and back by [`real_ticks_in`], so the two can't be mixed up.
 //!
 //! **Gaps.** A ladder is its best quote, a spread from the fair value, and independent gaps
 //! from its class's buckets (`profile.rs`, `Gaps`), and every change keeps it so:
@@ -49,7 +51,7 @@
 
 use engine::command::{Command, ModifyOrder, SetMark, SetMarketParams};
 use engine::money::{band_edges, ceil_div};
-use engine::types::{AccountId, Micros, OrderId, Price, Qty, Side, TimeInForce};
+use engine::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce};
 
 use super::super::profile::{Gaps, Market, POLYMARKET, Spread, pick};
 use super::super::{Clients, Item, NewOrder, stream};
@@ -79,15 +81,15 @@ fn gap_bucket(rank: usize) -> usize {
 /// 1 to 10 ticks has its share, and each of the tail's 64 equally likely values a 64th of the
 /// tail's share (a value the tail holds twice, twice that); 0 for a gap `gaps` never draws.
 /// At most `10^6 × 64`, so a sum of 74 products of two fits a `u64`.
-fn gap_weight(gaps: &Gaps, ticks: Price) -> u64 {
+fn gap_weight(gaps: &Gaps, ticks: i64) -> u64 {
     let tail = gaps.tail_ticks.0;
     match ticks {
         1..=10 => u64::from(gaps.one_to_ten_ppm[ticks as usize - 1]) * tail.len() as u64,
         11.. => {
             // The tail's values are in ascending order: those equal to `ticks` are the ones
             // from the first at least `ticks` to the first above it.
-            let from = tail.partition_point(|&value| Price::from(value) < ticks);
-            let to = tail.partition_point(|&value| Price::from(value) <= ticks);
+            let from = tail.partition_point(|&value| i64::from(value) < ticks);
+            let to = tail.partition_point(|&value| i64::from(value) <= ticks);
             u64::from(gaps.beyond_ten_ppm) * (to - from) as u64
         }
         _ => 0,
@@ -96,25 +98,25 @@ fn gap_weight(gaps: &Gaps, ticks: Price) -> u64 {
 
 /// Every gap `gaps` can draw, in real ticks, in ascending order, once each: 1 to 10, then the
 /// tail's values (all over 10).
-fn gap_values(gaps: &Gaps) -> impl Iterator<Item = Price> + Clone {
+fn gap_values(gaps: &Gaps) -> impl Iterator<Item = i64> + Clone {
     let tail = gaps.tail_ticks.0;
     let distinct = tail.iter().enumerate().filter(move |&(i, value)| i == 0 || tail[i - 1] != *value);
-    (1..=10).chain(distinct.map(|(_, &value)| Price::from(value)))
+    (1..=10).chain(distinct.map(|(_, &value)| i64::from(value)))
 }
 
 /// A spread of `centibps` hundredths of a bps at the fair value `fair`, in real ticks of `fair`,
 /// rounded, at least one.
-fn spread_ticks(fair: Price, centibps: u32) -> Price {
+fn spread_ticks(fair: Price, centibps: u32) -> i64 {
     // `c` hundredths of a bps are `F × c / 10^6` engine ticks.
     let tick = i128::from(real_tick(fair));
     let ticks = (i128::from(fair) * i128::from(centibps) + 500_000 * tick) / (1_000_000 * tick);
-    Price::try_from(ticks).expect("a spread fits a price").max(1)
+    i64::try_from(ticks).expect("a spread fits a price").max(1)
 }
 
 /// Every spread `spread` can draw at the fair value `fair`, in real ticks, one per equally
 /// likely value: one real tick for a tick-bound market, else each of the table's 64 values
 /// (so a spread that several values round to comes several times).
-fn spread_values(spread: &'static Spread, fair: Price) -> impl Iterator<Item = Price> + Clone {
+fn spread_values(spread: &'static Spread, fair: Price) -> impl Iterator<Item = i64> + Clone {
     let table: &'static [u32] = match spread {
         Spread::OneTick => &[],
         Spread::SplitLognormal { centibps, .. } => centibps.0,
@@ -126,20 +128,17 @@ fn spread_values(spread: &'static Spread, fair: Price) -> impl Iterator<Item = P
 /// The best bid and ask for a spread of `spread` real ticks around the fair value `fair`: the
 /// bid `floor((s − 1) / 2)` ticks below it, the ask `s` ticks above the bid (onto its grid).
 /// So the fair value is inside the spread: the bid at most at it, the ask above it.
-fn best_for(fair: Price, spread: Price) -> (Price, Price) {
+fn best_for(fair: Price, spread: i64) -> (Price, Price) {
     let tick = real_tick(fair);
-    let bid = fair - (spread - 1) / 2 * tick;
-    (bid, snap_up(bid + spread * tick))
+    let bid = fair - ticks_of((spread - 1) / 2, tick);
+    (bid, snap_up(bid + ticks_of(spread, tick)))
 }
 
 /// One of `candidates`' values, drawn with the chance of its weight (one draw from `rng`);
 /// `None`, drawing nothing, if every weight is 0. O(n). The draw's modulo bias
 /// (`SplitMix64::below`) is at most `total / 2^64`: under 1% for the weights here, whose
 /// total stays below `64 × (64 × 10^6)^2`.
-fn draw_weighted(
-    candidates: impl Iterator<Item = (Price, u64)> + Clone,
-    rng: &mut SplitMix64,
-) -> Option<Price> {
+fn draw_weighted(candidates: impl Iterator<Item = (i64, u64)> + Clone, rng: &mut SplitMix64) -> Option<i64> {
     let total: u64 = candidates.clone().map(|(_, weight)| weight).sum();
     if total == 0 {
         return None;
@@ -161,28 +160,50 @@ fn draw_weighted(
 /// engine ticks (1 below 100,000, 10 below 1,000,000, and so on).
 pub fn real_tick(price: Price) -> Price {
     let mut tick = 1;
-    while price / tick >= 100_000 {
+    while price.ticks() / tick >= 100_000 {
         tick *= 10;
     }
-    tick
+    Price::new(tick)
+}
+
+/// `real_ticks` real ticks of `tick` engine ticks each, in engine ticks.
+fn ticks_of(real_ticks: i64, tick: Price) -> Price {
+    Price::new(real_ticks * tick.ticks())
+}
+
+/// How many whole real ticks of `tick` engine ticks `distance` spans, rounded toward zero.
+fn real_ticks_in(distance: Price, tick: Price) -> i64 {
+    distance.ticks() / tick.ticks()
+}
+
+/// How many engine ticks apart two prices are: `|a − b|`.
+fn ticks_apart(a: Price, b: Price) -> Price {
+    Price::new((a - b).ticks().abs())
+}
+
+/// `price mod tick`, with `tick` the real tick at `price`: how far `price` is past the grid
+/// price at or below it.
+fn past_grid(price: Price, tick: Price) -> Price {
+    Price::new(price.ticks() % tick.ticks())
 }
 
 /// True if `price` is on its real grid.
 pub fn on_grid(price: Price) -> bool {
-    price % real_tick(price) == 0
+    past_grid(price, real_tick(price)) == Price::ZERO
 }
 
 /// `price` rounded down onto its real grid. The result is on its own grid too: it has at most
 /// as many digits, so its grid is at most as coarse.
 pub fn snap_down(price: Price) -> Price {
-    price - price % real_tick(price)
+    price - past_grid(price, real_tick(price))
 }
 
 /// `price` rounded up onto its real grid. If that crosses a power of ten, the result is that
 /// power of ten, which is on every grid.
 pub fn snap_up(price: Price) -> Price {
     let tick = real_tick(price);
-    if price % tick == 0 { price } else { price - price % tick + tick }
+    let past = past_grid(price, tick);
+    if past == Price::ZERO { price } else { price - past + tick }
 }
 
 /// `price` moved `distance` engine ticks away from the fair value, on `side`'s side of the
@@ -206,7 +227,7 @@ fn snap_away(side: Side, price: Price) -> Price {
 /// The grid price one real tick further from the fair value than `price` (itself on the grid).
 fn step_away(side: Side, price: Price) -> Price {
     match side {
-        Side::Buy => price - real_tick(price - 1),
+        Side::Buy => price - real_tick(price - Price::ONE_TICK),
         Side::Sell => price + real_tick(price),
     }
 }
@@ -215,7 +236,7 @@ fn step_away(side: Side, price: Price) -> Price {
 fn step_toward(side: Side, price: Price) -> Price {
     match side {
         Side::Buy => price + real_tick(price),
-        Side::Sell => price - real_tick(price - 1),
+        Side::Sell => price - real_tick(price - Price::ONE_TICK),
     }
 }
 
@@ -273,20 +294,27 @@ pub(super) struct MarketState {
 }
 
 impl MarketState {
+    /// This market's id, as its parameters carry it.
+    pub fn id(&self) -> MarketId {
+        self.params.market
+    }
+
     /// Market `spec` at its start price, with no quotes yet; its streams are `FAIR(m)` and
     /// `MM(m)` of `seed`, `m` its id.
     pub fn new(seed: u64, spec: &'static Market) -> MarketState {
         let params = market_params(spec);
         // The band's edges at the fair value, `F × (1 ± band)`, stay inside the price range:
         // `F ≥ min_price / (1 − band)` and `F ≤ max_price / (1 + band)`, rounded inward.
+        // Prices scaled by a rate: on the bare numbers of ticks.
         let band = i64::from(params.price_band_ppm);
-        let low = ceil_div(params.min_price * 1_000_000, 1_000_000 - band);
-        let high = params.max_price * 1_000_000 / (1_000_000 + band);
+        let (min_price, max_price) = (params.min_price.ticks(), params.max_price.ticks());
+        let low = Price::new(ceil_div(min_price * 1_000_000, 1_000_000 - band));
+        let high = Price::new(max_price * 1_000_000 / (1_000_000 + band));
         let m = u64::from(spec.id);
         MarketState {
             spec,
             params,
-            fair: spec.start_price,
+            fair: Price::new(spec.start_price),
             fair_low: snap_up(low),
             fair_high: snap_down(high),
             bids: Vec::new(),
@@ -302,9 +330,10 @@ impl MarketState {
         real_tick(self.fair)
     }
 
-    /// How far from the fair value a quote may be: half the band, in engine ticks.
+    /// How far from the fair value a quote may be: half the band, in engine ticks. A price
+    /// scaled by a rate: on the bare number of ticks.
     pub fn reach(&self) -> Price {
-        self.fair * i64::from(self.params.price_band_ppm) / 2_000_000
+        Price::new(self.fair.ticks() * i64::from(self.params.price_band_ppm) / 2_000_000)
     }
 
     fn ladder(&self, side: Side) -> &[Quote] {
@@ -323,7 +352,7 @@ impl MarketState {
 
     /// True if `price` is within reach of the fair value.
     fn within_reach(&self, price: Price) -> bool {
-        (price - self.fair).abs() <= self.reach()
+        ticks_apart(price, self.fair) <= self.reach()
     }
 
     /// The price furthest from the fair value that is within reach on `side`, on the grid.
@@ -368,16 +397,16 @@ impl MarketState {
     /// that no gap fits, the deepest free price within reach. Draws: the gap.
     fn next_price(&mut self, side: Side, price: Price, rank: usize) -> Price {
         let tick = self.tick();
-        let room = (self.reach() - (price - self.fair).abs()) / tick;
+        let room = real_ticks_in(self.reach() - ticks_apart(price, self.fair), tick);
         match self.draw_gap_within(rank, room) {
-            Some(gap) => self.free_price(side, away(side, price, gap * tick)),
+            Some(gap) => self.free_price(side, away(side, price, ticks_of(gap, tick))),
             None => self.free_price(side, self.deepest(side)),
         }
     }
 
     /// The operator's mark at the fair value.
     pub fn mark(&self) -> Item {
-        Item::Operator(Command::SetMark(SetMark { price: self.fair, market: self.spec.id }))
+        Item::Operator(Command::SetMark(SetMark { price: self.fair, market: self.id() }))
     }
 
     // -----------------------------------------------------------------------------------
@@ -385,7 +414,7 @@ impl MarketState {
 
     /// A spread, in real ticks, at least one: one real tick for a tick-bound market, else a
     /// draw of its spread table (bps) at the fair value, rounded ([`spread_ticks`]).
-    fn draw_spread(&mut self) -> Price {
+    fn draw_spread(&mut self) -> i64 {
         match self.spec.spread {
             Spread::OneTick => 1,
             Spread::SplitLognormal { centibps, .. } => {
@@ -396,7 +425,7 @@ impl MarketState {
 
     /// A gap after the quote at `rank`, in real ticks, drawn from its bucket's gaps among
     /// those of at most `room` ticks (see [`gap_weight`]); `None` if none is that short.
-    fn draw_gap_within(&mut self, rank: usize, room: Price) -> Option<Price> {
+    fn draw_gap_within(&mut self, rank: usize, room: i64) -> Option<i64> {
         let gaps = &self.spec.book.gaps[gap_bucket(rank)];
         let candidates =
             gap_values(gaps).take_while(|&gap| gap <= room).map(|gap| (gap, gap_weight(gaps, gap)));
@@ -410,7 +439,7 @@ impl MarketState {
     /// order of re-prices, the ladder keeps the recorded gaps). If no two gaps of the profile
     /// make `span` (a stretch a fresh spread or a pull left), the gap before is drawn among
     /// those shorter than `span`; `None` if `span` has no room for a quote.
-    fn draw_split(&mut self, rank: usize, span: Price) -> Option<Price> {
+    fn draw_split(&mut self, rank: usize, span: i64) -> Option<i64> {
         let book = self.spec.book;
         let (before, after) = (&book.gaps[gap_bucket(rank - 1)], &book.gaps[gap_bucket(rank)]);
         let pairs = gap_values(before)
@@ -428,7 +457,9 @@ impl MarketState {
     /// ([`MarketState::draw_notional`]), at least the profile's $10 minimum, with lots rounded
     /// up so that the quote is worth at least that.
     fn draw_size(&mut self, rank: usize, price: Price) -> Qty {
-        ceil_div(self.draw_notional(rank).max(POLYMARKET.min_notional), price)
+        let notional = self.draw_notional(rank).max(Micros::new(POLYMARKET.min_notional));
+        // Micros over ticks is lots (D-004's identity read backwards), on the bare numbers.
+        Qty::new(ceil_div(notional.micros(), price.ticks()))
     }
 
     /// A notional for a quote at `rank`, in micros (profile.rs, `LevelSizes`), with that
@@ -447,18 +478,18 @@ impl MarketState {
         let mut u = rng.below(MILLION);
         if u < dust {
             let [low, high] = POLYMARKET.dust_draw_cents;
-            return rng.in_range(i64::from(low), i64::from(high) - 1) * 10_000;
+            return Micros::new(rng.in_range(i64::from(low), i64::from(high) - 1) * 10_000);
         }
         u -= dust;
         for (&usd, &share) in shape.clips_usd.iter().zip(level.clips_ppm) {
             if u < u64::from(share) {
                 // `usd × 10^6` micros, times `(10^6 + jitter) / 10^6`.
                 let jitter = i64::from(shape.clip_jitter_ppm);
-                return i64::from(usd) * (1_000_000 + rng.in_range(-jitter, jitter));
+                return Micros::new(i64::from(usd) * (1_000_000 + rng.in_range(-jitter, jitter)));
             }
             u -= u64::from(share);
         }
-        i64::from(level.background_usd.draw(rng)) * 1_000_000
+        Micros::new(i64::from(level.background_usd.draw(rng)) * 1_000_000)
     }
 
     // -----------------------------------------------------------------------------------
@@ -495,7 +526,7 @@ impl MarketState {
     ) {
         let rank = self.rank_of(side, price);
         let order =
-            NewOrder { market: self.spec.id, side, price, qty: size, tif: TimeInForce::Gtc, post_only: true };
+            NewOrder { market: self.id(), side, price, qty: size, tif: TimeInForce::Gtc, post_only: true };
         let (order_id, item) = clients.place(maker, order);
         out.push(item);
         self.ladder_mut(side).insert(rank, Quote { price, size, order_id, maker });
@@ -504,7 +535,7 @@ impl MarketState {
     /// Cancels the quote at `rank`, and returns it.
     fn cancel(&mut self, side: Side, rank: usize, clients: &mut Clients, out: &mut Vec<Item>) -> Quote {
         let quote = self.ladder_mut(side).remove(rank);
-        out.push(clients.cancel(quote.maker, quote.order_id, self.spec.id));
+        out.push(clients.cancel(quote.maker, quote.order_id, self.id()));
         quote
     }
 
@@ -566,7 +597,7 @@ impl MarketState {
             order_id: quote.order_id,
             new_price: quote.price,
             new_size: size,
-            market: self.spec.id,
+            market: self.id(),
         };
         out.push(clients.send(quote.maker, Command::ModifyOrder(modify)));
         self.ladder_mut(side)[rank].size = size;
@@ -584,9 +615,9 @@ impl MarketState {
         let price = match self.ladder(side).get(rank).map(|next| next.price) {
             Some(next) => {
                 let tick = self.tick();
-                let span = (next - anchor).abs() / tick;
+                let span = real_ticks_in(ticks_apart(next, anchor), tick);
                 match self.draw_split(rank, span) {
-                    Some(gap) => self.free_price(side, away(side, anchor, gap * tick)),
+                    Some(gap) => self.free_price(side, away(side, anchor, ticks_of(gap, tick))),
                     None => old.price,
                 }
             }
@@ -612,7 +643,8 @@ impl MarketState {
         let candidates = spread_values(self.spec.spread, fair).map(|spread| {
             let (bid, ask) = best_for(fair, spread);
             let weight = if bid > second_bid && ask < second_ask {
-                gap_weight(gaps, (bid - second_bid) / tick) * gap_weight(gaps, (second_ask - ask) / tick)
+                gap_weight(gaps, real_ticks_in(bid - second_bid, tick))
+                    * gap_weight(gaps, real_ticks_in(second_ask - ask, tick))
             } else {
                 0
             };
@@ -742,7 +774,7 @@ impl MarketState {
     /// Moves the fair value `ticks` up or down, onto its grid and inside its bounds. Returns
     /// false if that left it where it was (at a bound).
     fn move_fair(&mut self, ticks: i128, up: bool) -> bool {
-        let ticks = Price::try_from(ticks).expect("a move fits a price");
+        let ticks = Price::new(i64::try_from(ticks).expect("a move fits a price"));
         let target = if up { self.fair + ticks } else { self.fair - ticks };
         let fair = snap_down(target.clamp(self.fair_low, self.fair_high));
         let moved = fair != self.fair;
@@ -836,7 +868,9 @@ impl MarketState {
             Side::Buy => snap_down(edges.upper),
             Side::Sell => snap_up(edges.lower),
         };
-        let qty = ceil_div(notional.max(POLYMARKET.min_notional), self.fair).max(1);
-        NewOrder { market: self.spec.id, side, price, qty, tif: TimeInForce::Ioc, post_only: false }
+        let notional = notional.max(Micros::new(POLYMARKET.min_notional));
+        // Micros over ticks is lots (D-004's identity read backwards), on the bare numbers.
+        let qty = Qty::new(ceil_div(notional.micros(), self.fair.ticks()).max(1));
+        NewOrder { market: self.id(), side, price, qty, tif: TimeInForce::Ioc, post_only: false }
     }
 }

@@ -16,13 +16,13 @@ use crate::event::{Event, EventSink, LeverageSet, MarkPrice, RejectReason};
 use crate::id_hash::IdBuildHasher;
 use crate::mode::Mode;
 use crate::money::{
-    MAX_TIERS, PRICE_LIMIT, band_edges, band_rule_1_holds, band_rule_2_holds, initial_margin, top_up_needed,
+    MAX_TIERS, PRICE_LIMIT, band_edges, band_rule_1_holds, band_rule_2_holds, initial_margin,
     withdrawal_reserve,
 };
 use crate::state::{Account, Market};
-use crate::types::{AccountId, Micros};
+use crate::types::{AccountId, Micros, Qty};
 
-use super::{Engine, FUND, OPERATOR, balance_event, reject};
+use super::{Engine, FUND, NO_ORDER, OPERATOR, balance_event, reject};
 
 impl<B: OrderBook, M: Mode> Engine<B, M> {
     // -----------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     pub(super) fn deposit(&mut self, deposit: &Deposit, events: &mut impl EventSink) {
         let new_balance = match self.check_deposit(deposit) {
             Ok(balance) => balance,
-            Err(reason) => return reject(events, 0, deposit.account, reason),
+            Err(reason) => return reject(events, NO_ORDER, deposit.account, reason),
         };
         self.start_command();
         self.net_deposits += i128::from(deposit.amount);
@@ -51,7 +51,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     fn check_deposit(&self, deposit: &Deposit) -> Result<Micros, RejectReason> {
         let balance =
             if deposit.account == FUND { self.fund_balance } else { self.free_balance(deposit.account) };
-        if deposit.amount < 1 {
+        if deposit.amount < Micros::new(1) {
             return Err(RejectReason::InvalidAmount);
         }
         balance.checked_add(deposit.amount).ok_or(RejectReason::InvalidAmount)
@@ -63,7 +63,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     pub(super) fn withdraw(&mut self, withdraw: &Withdraw, events: &mut impl EventSink) {
         let free_after = match self.check_withdraw(withdraw) {
             Ok(free) => free,
-            Err(reason) => return reject(events, 0, withdraw.account, reason),
+            Err(reason) => return reject(events, NO_ORDER, withdraw.account, reason),
         };
         self.start_command();
         self.account_mut(withdraw.account).free = free_after;
@@ -79,12 +79,12 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         if withdraw.account == FUND {
             return Err(RejectReason::ReservedAccount);
         }
-        if withdraw.amount < 1 {
+        if withdraw.amount < Micros::new(1) {
             return Err(RejectReason::InvalidAmount);
         }
         // Can't overflow: the free balance is at least 0 and the amount at least 1.
         let free_after = self.free_balance(withdraw.account) - withdraw.amount;
-        if free_after < 0 {
+        if free_after < Micros::ZERO {
             return Err(RejectReason::InsufficientBalance);
         }
         let (locked, open_notional) = self.locked_and_open_notional(withdraw.account);
@@ -101,7 +101,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         for market in self.markets.iter().flatten() {
             let Some(slot) = market.find_slot(account) else { continue };
             locked += i128::from(slot.locked);
-            if slot.pos != 0 {
+            if slot.pos != Qty::ZERO {
                 let mark = market.mark.expect("a market where someone holds a position has a mark");
                 open_notional += i128::from(slot.pos.abs()) * i128::from(mark);
             }
@@ -116,7 +116,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         let (market_id, account) = (command.market, command.account);
         let margined = match self.check_set_leverage(command) {
             Ok(margined) => margined,
-            Err(reason) => return reject(events, 0, account, reason),
+            Err(reason) => return reject(events, NO_ORDER, account, reason),
         };
         self.start_command();
         self.accounts.entry(account).or_insert(Account::NEW);
@@ -151,12 +151,12 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         }
         let Some(slot) = market.find_slot(command.account) else { return Ok(None) };
         let size = Self::worst_case_size_of(market, command.account, slot);
-        if size == 0 {
+        if size == Qty::ZERO {
             return Ok(None);
         }
         let mark = market.mark.expect("a slot with orders or a position is in a market with a mark");
         let requirement = initial_margin(size, mark, command.leverage, market.live_tiers());
-        let need = top_up_needed(requirement, slot.equity(mark));
+        let need = slot.money().top_up_needed(mark, requirement);
         if need <= self.free_balance(command.account) {
             Ok(Some(need))
         } else {
@@ -169,7 +169,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
     pub(super) fn set_mark(&mut self, command: &SetMark, events: &mut impl EventSink) {
         if let Err(reason) = self.check_set_mark(command) {
-            return reject(events, 0, OPERATOR, reason);
+            return reject(events, NO_ORDER, OPERATOR, reason);
         }
         let market_id = command.market;
         self.start_command();
@@ -210,7 +210,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
     pub(super) fn set_market_params(&mut self, params: &SetMarketParams, events: &mut impl EventSink) {
         if let Err(reason) = self.check_market_params(params) {
-            return reject(events, 0, OPERATOR, reason);
+            return reject(events, NO_ORDER, OPERATOR, reason);
         }
         self.start_command();
         let config =
@@ -221,7 +221,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         };
         let book = B::with_config(config, book_options);
 
-        let index = usize::from(params.market);
+        let index = params.market.index();
         if self.markets.len() <= index {
             self.markets.resize_with(index + 1, || None);
         }
@@ -250,7 +250,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
     pub(super) fn set_risk_tier(&mut self, row: &SetRiskTier, events: &mut impl EventSink) {
         if let Err(reason) = self.check_risk_tier(row) {
-            return reject(events, 0, OPERATOR, reason);
+            return reject(events, NO_ORDER, OPERATOR, reason);
         }
         self.start_command();
         // Committing a table on a live market is allowed: tiers change only IM, not MM or
@@ -301,7 +301,7 @@ fn tier_row_is_valid<B>(row: &SetRiskTier, market: &Market<B>) -> bool {
         return false;
     }
     if index == 0 {
-        return row.lower_bound == 0;
+        return row.lower_bound == Micros::ZERO;
     }
     let previous = market.staged[index - 1];
     row.index == market.staged_rows

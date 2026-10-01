@@ -11,16 +11,15 @@ use engine::command::{
 use engine::engine::{Engine, EngineOptions, EngineSnapshot, FUND};
 use engine::event::Event;
 use engine::mode::{Fast, NaiveLiquidation};
-use engine::money::liquidation_key;
-use engine::types::{AccountId, MarketId, Price, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
-const MARKET: MarketId = 1;
-const MID: Price = 100_000;
+const MARKET: MarketId = MarketId::new(1);
+const MID: Price = Price::new(100_000);
 const MAX_LEVERAGE: u16 = 20;
 /// Traders 1 to 300 open longs, 301 to 600 open shorts.
-const TRADERS_PER_SIDE: AccountId = 300;
+const TRADERS_PER_SIDE: u32 = 300;
 /// The counterparty of every trader, at leverage 1.
-const MAKER: AccountId = 1_000;
+const MAKER: AccountId = AccountId::new(1_000);
 
 /// Every command of the scenario below, on `Engine<Book, Fast>` and on
 /// `Engine<Book, NaiveLiquidation>`, which differ only in the liquidation index.
@@ -75,8 +74,8 @@ impl TwoEngines {
             .collect();
         let mut in_walk_order = walked.clone();
         in_walk_order.sort_by_key(|&(side, key, account)| match side {
-            Side::Buy => (0, -key, account),
-            Side::Sell => (1, key, account),
+            Side::Buy => (0, -key.ticks(), account),
+            Side::Sell => (1, key.ticks(), account),
         });
         assert_eq!(walked, in_walk_order, "SetMark {price}");
         self.liquidations += walked.len();
@@ -89,16 +88,16 @@ impl TwoEngines {
 /// The side and liquidation key of `account`'s slot in `state`.
 fn key_before(state: &EngineSnapshot, account: AccountId) -> (Side, Price, AccountId) {
     let slot = state.markets[0].slots.iter().find(|slot| slot.account == account).expect("a slot");
-    let (side, key) =
-        liquidation_key(slot.pos, slot.cost, slot.locked, MAX_LEVERAGE).expect("a liquidated slot had a key");
+    let (side, key) = slot.money().liquidation_key(MAX_LEVERAGE).expect("a liquidated slot had a key");
     (side, key, account)
 }
 
+/// An order of `qty` lots.
 fn order(account: AccountId, seq: u32, side: Side, price: Price, qty: i64, tif: TimeInForce) -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(account, seq),
+        order_id: order_id(account, OrderSeq::new(seq)),
         price,
-        qty,
+        qty: Qty::new(qty),
         market: MARKET,
         side,
         tif,
@@ -117,8 +116,8 @@ fn leverage(account: AccountId, leverage: u16) -> Command {
 fn a_deep_liquidation_index_walks_in_the_same_order_as_a_scan() {
     let mut engines = TwoEngines::new();
     engines.apply(Command::SetMarketParams(SetMarketParams {
-        min_price: 1_000,
-        max_price: 300_000,
+        min_price: Price::new(1_000),
+        max_price: Price::new(300_000),
         maker_fee_ppm: 125,
         taker_fee_ppm: 400,
         price_band_ppm: 22_100,
@@ -126,31 +125,32 @@ fn a_deep_liquidation_index_walks_in_the_same_order_as_a_scan() {
         max_leverage: MAX_LEVERAGE,
     }));
     engines.apply(Command::SetRiskTier(SetRiskTier {
-        lower_bound: 0,
+        lower_bound: Micros::ZERO,
         market: MARKET,
         max_leverage: MAX_LEVERAGE,
         index: 0,
         count: 1,
     }));
     engines.apply(Command::SetMark(SetMark { price: MID, market: MARKET }));
-    engines.apply(Command::Deposit(Deposit { amount: 1_000_000_000_000, account: FUND }));
-    engines.apply(Command::Deposit(Deposit { amount: 1_000_000_000_000_000, account: MAKER }));
+    engines.apply(Command::Deposit(Deposit { amount: Micros::new(1_000_000_000_000), account: FUND }));
+    engines.apply(Command::Deposit(Deposit { amount: Micros::new(1_000_000_000_000_000), account: MAKER }));
 
     // Each trader takes 10 to 70 lots from the maker at the mark, at leverage 2 to 20. The
-    // pair repeats every 133 accounts, so some slots are identical and share a key.
+    // pair repeats every 133 accounts, so some slots are identical and share a key. The
+    // numbers are the accounts' ids, read with `.get()` where they pick a size or leverage.
     let traders = |side: Side| {
         let first = if side == Side::Buy { 1 } else { TRADERS_PER_SIDE + 1 };
-        first..first + TRADERS_PER_SIDE
+        (first..first + TRADERS_PER_SIDE).map(AccountId::new)
     };
-    let lots = |account: AccountId| 10 + 10 * i64::from(account % 7);
+    let lots = |account: AccountId| 10 + 10 * i64::from(account.get() % 7);
     let mut seq = 0;
     for side in [Side::Buy, Side::Sell] {
         seq += 1;
         let total: i64 = traders(side).map(lots).sum();
         engines.apply(order(MAKER, seq, side.opposite(), MID, total, TimeInForce::Gtc));
         for account in traders(side) {
-            engines.apply(Command::Deposit(Deposit { amount: 100_000_000, account }));
-            engines.apply(leverage(account, 2 + (account % 19) as u16));
+            engines.apply(Command::Deposit(Deposit { amount: Micros::new(100_000_000), account }));
+            engines.apply(leverage(account, 2 + (account.get() % 19) as u16));
             engines.apply(order(account, 1, side, MID, lots(account), TimeInForce::Ioc));
         }
     }
@@ -160,20 +160,22 @@ fn a_deep_liquidation_index_walks_in_the_same_order_as_a_scan() {
     // mark tops up and its cancel releases again. Every third trader leaves its order
     // resting, for the band sweep or the liquidation to cancel.
     for account in traders(Side::Buy).chain(traders(Side::Sell)) {
-        engines.apply(leverage(account, 2 + ((account * 7) % 19) as u16));
-        let side = if account <= TRADERS_PER_SIDE { Side::Buy } else { Side::Sell };
-        let away = if side == Side::Buy { MID - 1_000 } else { MID + 1_000 };
+        engines.apply(leverage(account, 2 + ((account.get() * 7) % 19) as u16));
+        let side = if account.get() <= TRADERS_PER_SIDE { Side::Buy } else { Side::Sell };
+        let away = if side == Side::Buy { MID - Price::new(1_000) } else { MID + Price::new(1_000) };
         engines.apply(order(account, 2, side, away, 5, TimeInForce::Gtc));
-        if account % 3 != 0 {
-            engines
-                .apply(Command::CancelOrder(CancelOrder { order_id: order_id(account, 2), market: MARKET }));
+        if account.get() % 3 != 0 {
+            engines.apply(Command::CancelOrder(CancelOrder {
+                order_id: order_id(account, OrderSeq::new(2)),
+                market: MARKET,
+            }));
         }
     }
     engines.assert_same_state();
 
     // The mark falls through the longs' keys, comes back, then rises through the shorts'.
-    let falling = (0..40).map(|step| MID - 500 * step);
-    let rising = (0..40).map(|step| MID + 500 * step);
+    let falling = (0..40).map(|step| MID - Price::new(500 * step));
+    let rising = (0..40).map(|step| MID + Price::new(500 * step));
     for price in falling.chain(rising) {
         engines.set_mark(price);
     }

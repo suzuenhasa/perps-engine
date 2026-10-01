@@ -135,21 +135,21 @@ impl FlowContent {
             }
             content.clients += 1;
             content.per_lane[gateway_of(client.account, lanes)] += 1;
-            let account = client.account as usize;
+            let account = client.account.index();
             if per_account.len() <= account {
                 per_account.resize(account + 1, 0);
             }
             per_account[account] += 1;
             let market = client_market(&client.command);
-            if per_market.len() <= usize::from(market) {
-                per_market.resize(usize::from(market) + 1, MarketCount::default());
+            if per_market.len() <= market.index() {
+                per_market.resize(market.index() + 1, MarketCount::default());
             }
-            let counts = &mut per_market[usize::from(market)];
+            let counts = &mut per_market[market.index()];
             counts.market = market;
             counts.clients += 1;
             if is_ioc(item) {
                 content.ioc_places += 1;
-                if (TAKER_BASE..HIGH_LEVERAGE_BASE).contains(&client.account) {
+                if (TAKER_BASE..HIGH_LEVERAGE_BASE).contains(&client.account.get()) {
                     content.taker_iocs += 1;
                     counts.taker_iocs += 1;
                 }
@@ -159,7 +159,7 @@ impl FlowContent {
         let mut busiest: Option<(AccountId, u64)> = None;
         for (account, &n) in per_account.iter().enumerate() {
             if n > busiest.map_or(0, |(_, most)| most) {
-                busiest = Some((account as AccountId, n));
+                busiest = Some((AccountId::new(account as u32), n));
             }
         }
         content.busiest_account = busiest;
@@ -181,7 +181,7 @@ fn client_market(command: &Command) -> MarketId {
         Command::PlaceOrder(place) => place.market,
         Command::CancelOrder(cancel) => cancel.market,
         Command::ModifyOrder(modify) => modify.market,
-        _ => 0,
+        _ => MarketId::new(0),
     }
 }
 
@@ -899,8 +899,8 @@ mod tests {
     fn market_shares_rank_markets_and_count_the_quiet_ones_in_the_median() {
         // 10 markets of a flow of 12: two share the top count, two have none.
         let counts = [(5, 40), (2, 40), (7, 10), (1, 5), (3, 1), (4, 1), (6, 1), (8, 1), (9, 1), (10, 0)];
-        let shares = MarketShares::of(counts.into_iter(), 12);
-        assert_eq!(shares.top, Some(2), "the lowest id of the two busiest");
+        let shares = MarketShares::of(counts.into_iter().map(|(market, n)| (MarketId::new(market), n)), 12);
+        assert_eq!(shares.top, Some(MarketId::new(2)), "the lowest id of the two busiest");
         assert_eq!((shares.top_ppm, shares.active), (400_000, 9));
         assert_eq!(shares.top10_ppm, 1_000_000, "9 markets hold everything");
         // Ascending over 12 markets: 0, 0, 0, 1, 1, 1, 1, 1, 5, 10, 40, 40; the lower middle is 1.

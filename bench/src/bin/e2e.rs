@@ -207,7 +207,9 @@ fn main() -> ExitCode {
         Ok(args) => args,
         Err(e) => return fail(&e),
     };
-    let command = args.words.first().map(String::as_str).unwrap_or("help");
+    // `--help` anywhere prints the usage: `run --help` mustn't start a run.
+    let command =
+        if args.flag("help") { "help" } else { args.words.first().map(String::as_str).unwrap_or("help") };
     let result = match command {
         "probe" => probe_command(&args),
         "run" => run_command(&args),
@@ -723,6 +725,7 @@ fn state_vs_live(path: &Path, replayed: &str) -> String {
 mod tests {
     use super::*;
     use engine::event::{Event, MarkPrice};
+    use engine::types::{MarketId, Price};
 
     fn args(text: &str) -> Args {
         Args::parse(text.split_whitespace().map(str::to_string)).expect("parses")
@@ -868,7 +871,9 @@ mod tests {
 
     /// Event slots of commands `seqs`, one mark each.
     fn slots(seqs: std::ops::RangeInclusive<u64>) -> Vec<u64> {
-        let mark = |seq: u64| Event::MarkPrice(MarkPrice { price: seq as i64, market: 1 });
+        let mark = |seq: u64| {
+            Event::MarkPrice(MarkPrice { price: Price::new(seq as i64), market: MarketId::new(1) })
+        };
         seqs.flat_map(|seq| pipeline::records::event_slot(seq, &mark(seq))).collect()
     }
 

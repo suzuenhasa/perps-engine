@@ -64,7 +64,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use engine::engine::FUND;
 use engine::event::Event;
-use engine::types::MarketId;
+use engine::types::{MarketId, Micros, Price, Qty};
 
 use crate::clock::RunClock;
 use crate::codec::{EVENT_WORDS, cancel_reason_code, command_tags, decode_event, reject_reason_code};
@@ -306,7 +306,7 @@ pub struct EventCounts {
     pub insurance_absorbs: u64,
     pub shortfall_reports: u64,
     /// The largest `InsuranceShortfall.uncovered` (the peak shortfall).
-    pub peak_shortfall: i64,
+    pub peak_shortfall: Micros,
 }
 
 impl EventCounts {
@@ -409,9 +409,9 @@ const CLIENT_TAGS: [u8; 3] =
 /// The fund's position and cost in one market, and the market's mark.
 #[derive(Clone, Copy, Debug, Default)]
 struct FundMarket {
-    position: i64,
-    cost: i64,
-    mark: i64,
+    position: Qty,
+    cost: Micros,
+    mark: Price,
     /// `position × mark − cost`.
     upnl: i128,
 }
@@ -448,7 +448,7 @@ impl FundTracker {
     }
 
     fn market(&mut self, market: MarketId) -> &mut FundMarket {
-        let index = usize::from(market);
+        let index = market.index();
         if self.markets.len() <= index {
             self.markets.resize(index + 1, FundMarket::default());
         }
@@ -964,7 +964,7 @@ mod tests {
         Ack, BalanceChanged, CancelReason, Cancelled, Fill, InsuranceShortfall, MarkPrice, PositionChanged,
         Reject, RejectReason,
     };
-    use engine::types::Side;
+    use engine::types::{AccountId, OrderId, Side};
 
     fn gate(capture: Option<usize>, lanes: usize) -> (Producer<1>, Gate) {
         let (producer, consumer) = channel::<1>(64);
@@ -998,7 +998,7 @@ mod tests {
     }
 
     fn ack(seq: u64) -> [u64; 8] {
-        event_slot(seq, &Event::Ack(Ack { order_id: seq }))
+        event_slot(seq, &Event::Ack(Ack { order_id: OrderId::new(seq) }))
     }
 
     fn publish(producer: &mut Producer<1>, slots: &[[u64; 8]]) {
@@ -1158,29 +1158,32 @@ mod tests {
     fn the_breakdown_counts_outcomes_and_results() {
         let (mut producer, mut gate) = gate(None, 1);
         let fill = Event::Fill(Fill {
-            maker_order: 1,
-            taker_order: 2,
-            price: 1_000,
-            qty: 7,
-            maker_fee: 0,
-            taker_fee: 0,
-            market: 1,
+            maker_order: OrderId::new(1),
+            taker_order: OrderId::new(2),
+            price: Price::new(1_000),
+            qty: Qty::new(7),
+            maker_fee: Micros::ZERO,
+            taker_fee: Micros::ZERO,
+            market: MarketId::new(1),
             taker_side: Side::Buy,
         });
         let cancelled = Event::Cancelled(Cancelled {
-            order_id: 2,
-            remaining: 3,
-            market: 1,
+            order_id: OrderId::new(2),
+            remaining: Qty::new(3),
+            market: MarketId::new(1),
             reason: CancelReason::IocRemainder,
             side: Side::Buy,
         });
-        let reject =
-            Event::Reject(Reject { order_id: 3, account: 1, reason: RejectReason::InsufficientMargin });
+        let reject = Event::Reject(Reject {
+            order_id: OrderId::new(3),
+            account: AccountId::new(1),
+            reason: RejectReason::InsufficientMargin,
+        });
         let outcome = crate::records::outcome(&reject);
         publish(
             &mut producer,
             &[
-                event_slot(1, &Event::Ack(Ack { order_id: 2 })),
+                event_slot(1, &Event::Ack(Ack { order_id: OrderId::new(2) })),
                 event_slot(1, &fill),
                 event_slot(1, &cancelled),
                 trailer(1, Source::PreVerifiedClient, 1, 0, 3).to_words(),
@@ -1205,17 +1208,17 @@ mod tests {
     #[test]
     fn the_fund_equity_follows_its_balance_positions_and_marks() {
         let mut fund = FundTracker::default();
-        let balance = |free| Event::BalanceChanged(BalanceChanged { free, account: FUND });
-        let position = |position, cost_basis| {
+        let balance = |free| Event::BalanceChanged(BalanceChanged { free: Micros::new(free), account: FUND });
+        let position = |lots, cost_basis| {
             Event::PositionChanged(PositionChanged {
-                position,
-                cost_basis,
-                locked: 0,
+                position: Qty::new(lots),
+                cost_basis: Micros::new(cost_basis),
+                locked: Micros::ZERO,
                 account: FUND,
-                market: 3,
+                market: MarketId::new(3),
             })
         };
-        let mark = |price| Event::MarkPrice(MarkPrice { price, market: 3 });
+        let mark = |ticks| Event::MarkPrice(MarkPrice { price: Price::new(ticks), market: MarketId::new(3) });
         fund.on_event(&balance(1_000));
         fund.sample(false); // setup: equity 1,000 before the window
         fund.on_event(&mark(100));
@@ -1225,7 +1228,10 @@ mod tests {
         fund.on_event(&mark(50)); // upnl 500 − 900 = −400
         fund.sample(true);
         fund.on_event(&mark(80)); // upnl −100
-        fund.on_event(&Event::BalanceChanged(BalanceChanged { free: 5, account: 7 })); // not the fund
+        fund.on_event(&Event::BalanceChanged(BalanceChanged {
+            free: Micros::new(5),
+            account: AccountId::new(7),
+        })); // not the fund
         fund.sample(true);
         let stats = fund.stats();
         assert_eq!(stats.start, Some(1_000), "the equity when the window opened");
@@ -1293,9 +1299,9 @@ mod tests {
         assert!(crate::codec::reject_reason_from_code(REJECT_REASONS as u8).is_none());
         assert!(crate::codec::cancel_reason_from_code(CANCEL_REASONS as u8 - 1).is_some());
         assert!(crate::codec::cancel_reason_from_code(CANCEL_REASONS as u8).is_none());
-        let shortfall = Event::InsuranceShortfall(InsuranceShortfall { uncovered: 42 });
+        let shortfall = Event::InsuranceShortfall(InsuranceShortfall { uncovered: Micros::new(42) });
         let mut counts = EventCounts::default();
         counts.count(&shortfall);
-        assert_eq!((counts.shortfall_reports, counts.peak_shortfall), (1, 42));
+        assert_eq!((counts.shortfall_reports, counts.peak_shortfall), (1, Micros::new(42)));
     }
 }

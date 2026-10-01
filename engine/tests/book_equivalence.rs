@@ -53,24 +53,28 @@ use engine::book::{Book, BookConfig, OrderBook, RestingOrder};
 use engine::command::PlaceOrder;
 use engine::event::{CancelReason, Event};
 use engine::reference::ReferenceBook;
-use engine::types::{AccountId, OrderId, Price, Qty, Side, TimeInForce, account_of, order_id};
+use engine::types::{
+    AccountId, MarketId, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, account_of, order_id,
+};
 use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::test_runner::TestCaseError;
 
-const MARKET: u16 = 1;
+const MARKET: MarketId = MarketId::new(1);
 
 /// The narrow market: 21 ticks.
-const NARROW: BookConfig = BookConfig { market: MARKET, min_price: 90, max_price: 110 };
+const NARROW: BookConfig =
+    BookConfig { market: MARKET, min_price: Price::new(90), max_price: Price::new(110) };
 
 /// The wide market: 300,000 ticks, so the level index has four layers (300,000 levels fill
 /// 4,688 words; the layers above have 74, 2 and 1).
-const WIDE: BookConfig = BookConfig { market: MARKET, min_price: 1, max_price: 300_000 };
+const WIDE: BookConfig =
+    BookConfig { market: MARKET, min_price: Price::new(1), max_price: Price::new(300_000) };
 
-/// Levels (price minus `min_price`) on either side of where a word of the level index
-/// begins: a layer-0 word covers 64 levels, a layer-1 word 4,096 and a layer-2 word
+/// Levels (price minus `min_price`, in ticks) on either side of where a word of the level
+/// index begins: a layer-0 word covers 64 levels, a layer-1 word 4,096 and a layer-2 word
 /// 262,144 (`level_index.rs`).
-const BOUNDARY_LEVELS: [Price; 9] = [63, 64, 65, 4_095, 4_096, 4_097, 262_143, 262_144, 262_145];
+const BOUNDARY_LEVELS: [i64; 9] = [63, 64, 65, 4_095, 4_096, 4_097, 262_143, 262_144, 262_145];
 
 /// One step of a generated scenario. Order ids are resolved when the step runs, so cancels
 /// and modifies usually hit orders that exist.
@@ -160,9 +164,10 @@ fn tif() -> impl Strategy<Value = TimeInForce> {
 }
 
 /// Prices for the narrow market: mostly near the middle of the range (so orders interact),
-/// some anywhere in the range including both ends, and a few just outside it.
+/// some anywhere in the range including both ends, and a few just outside it. Drawn in
+/// ticks, then made prices.
 fn narrow_price() -> BoxedStrategy<Price> {
-    let (min, max) = (NARROW.min_price, NARROW.max_price);
+    let (min, max) = (NARROW.min_price.ticks(), NARROW.max_price.ticks());
     prop_oneof![
         16 => 95i64..=105,
         3 => min..=max,
@@ -170,6 +175,7 @@ fn narrow_price() -> BoxedStrategy<Price> {
         1 => Just(max),
         1 => prop_oneof![Just(min - 1), Just(max + 1), Just(0i64)],
     ]
+    .prop_map(Price::new)
     .boxed()
 }
 
@@ -177,20 +183,21 @@ fn narrow_price() -> BoxedStrategy<Price> {
 /// of either end of the range (a few of those fall just outside it), often in a dense band
 /// in the middle, now and then anywhere.
 fn wide_price() -> BoxedStrategy<Price> {
-    let (min, max) = (WIDE.min_price, WIDE.max_price);
-    let mut anchors: Vec<Price> = BOUNDARY_LEVELS.iter().map(|level| min + level).collect();
+    let (min, max) = (WIDE.min_price.ticks(), WIDE.max_price.ticks());
+    let mut anchors: Vec<i64> = BOUNDARY_LEVELS.iter().map(|level| min + level).collect();
     anchors.extend([min, max]);
     prop_oneof![
         6 => (prop::sample::select(anchors), -2i64..=2).prop_map(|(anchor, offset)| anchor + offset),
         3 => 150_000i64..=150_020,
         1 => min..=max,
     ]
+    .prop_map(Price::new)
     .boxed()
 }
 
 /// Mostly valid quantities, sometimes zero or negative.
 fn qty() -> impl Strategy<Value = Qty> {
-    prop_oneof![20 => 1i64..=10, 1 => -1i64..=0]
+    prop_oneof![20 => 1i64..=10, 1 => -1i64..=0].prop_map(Qty::new)
 }
 
 fn target() -> impl Strategy<Value = Target> {
@@ -202,12 +209,12 @@ fn target() -> impl Strategy<Value = Target> {
 
 fn modify_kind(price: BoxedStrategy<Price>) -> impl Strategy<Value = ModifyKind> {
     prop_oneof![
-        3 => (0i64..=2).prop_map(|below| ModifyKind::AtOrBelowFilled { below }),
-        2 => (1i64..=5).prop_map(|by| ModifyKind::Shrink { by }),
+        3 => (0i64..=2).prop_map(|below| ModifyKind::AtOrBelowFilled { below: Qty::new(below) }),
+        2 => (1i64..=5).prop_map(|by| ModifyKind::Shrink { by: Qty::new(by) }),
         1 => Just(ModifyKind::SameSize),
-        2 => (1i64..=5).prop_map(|by| ModifyKind::Grow { by }),
+        2 => (1i64..=5).prop_map(|by| ModifyKind::Grow { by: Qty::new(by) }),
         3 => price.clone().prop_map(|price| ModifyKind::NewPrice { price }),
-        3 => (0i64..=2).prop_map(|through| ModifyKind::Cross { through }),
+        3 => (0i64..=2).prop_map(|through| ModifyKind::Cross { through: Price::new(through) }),
         1 => (price, qty()).prop_map(|(price, size)| ModifyKind::Raw { price, size }),
     ]
 }
@@ -215,7 +222,7 @@ fn modify_kind(price: BoxedStrategy<Price>) -> impl Strategy<Value = ModifyKind>
 /// A new order: 20% post-only, and three in four passive.
 fn place(price: BoxedStrategy<Price>) -> impl Strategy<Value = Step> {
     let (post_only, passive) = (prop::bool::weighted(0.2), prop::bool::weighted(0.75));
-    (1u32..=4, side(), price, qty(), tif(), post_only, passive).prop_map(
+    ((1u32..=4).prop_map(AccountId::new), side(), price, qty(), tif(), post_only, passive).prop_map(
         |(account, side, price, qty, tif, post_only, passive)| Step::Place {
             account,
             side,
@@ -250,8 +257,8 @@ fn step(price: BoxedStrategy<Price>) -> impl Strategy<Value = Step> {
         1 => place_reused_id(price.clone()),
         2 => target().prop_map(|target| Step::Cancel { target }),
         6 => (target(), modify_kind(price)).prop_map(|(target, kind)| Step::Modify { target, kind }),
-        1 => (1u32..=4).prop_map(|account| Step::CancelAccount { account }),
-        1 => (side(), 0i64..=3).prop_map(|(side, depth)| Step::CancelBeyond { side, depth }),
+        1 => (1u32..=4).prop_map(|n| Step::CancelAccount { account: AccountId::new(n) }),
+        1 => (side(), 0i64..=3).prop_map(|(side, depth)| Step::CancelBeyond { side, depth: Price::new(depth) }),
     ]
 }
 
@@ -301,9 +308,9 @@ impl Scenario {
     }
 
     fn new_id(&mut self, account: AccountId) -> OrderId {
-        let seq = &mut self.next_seq[account as usize];
+        let seq = &mut self.next_seq[account.index()];
         *seq += 1;
-        let id = order_id(account, *seq);
+        let id = order_id(account, OrderSeq::new(*seq));
         self.issued.push(id);
         id
     }
@@ -311,7 +318,7 @@ impl Scenario {
     /// An id that was issued earlier, or one that never existed if none were.
     fn existing_id(&self, target: &Index) -> OrderId {
         if self.issued.is_empty() {
-            order_id(4, 999_999)
+            order_id(AccountId::new(4), OrderSeq::new(999_999))
         } else {
             self.issued[target.index(self.issued.len())]
         }
@@ -352,7 +359,7 @@ impl Scenario {
         match target {
             Target::Resting(index) if !resting.is_empty() => {
                 let partly_filled: Vec<&RestingOrder> =
-                    resting.iter().filter(|order| order.filled > 0).collect();
+                    resting.iter().filter(|order| order.filled > Qty::ZERO).collect();
                 if prefer_partly_filled && !partly_filled.is_empty() {
                     partly_filled[index.index(partly_filled.len())].order_id
                 } else {
@@ -375,18 +382,19 @@ impl Scenario {
             // `UnknownOrder` (the `Raw` kind sends invalid ones too).
             let (price, size) = match *kind {
                 ModifyKind::Raw { price, size } => (price, size),
-                _ => (self.config.min_price, 1),
+                _ => (self.config.min_price, Qty::new(1)),
             };
             return Call::Modify(id, price, size);
         };
 
-        let total = order.filled + order.qty;
+        let (total, one_lot) = (order.filled + order.qty, Qty::new(1));
         let (price, size) = match *kind {
             ModifyKind::AtOrBelowFilled { below } => {
-                let size = if order.filled == 0 { 0 } else { (order.filled - below).max(1) };
+                let size =
+                    if order.filled == Qty::ZERO { Qty::ZERO } else { (order.filled - below).max(one_lot) };
                 (order.price, size)
             }
-            ModifyKind::Shrink { by } => (order.price, order.filled + (order.qty - by).max(1)),
+            ModifyKind::Shrink { by } => (order.price, order.filled + (order.qty - by).max(one_lot)),
             ModifyKind::SameSize => (order.price, total),
             ModifyKind::Grow { by } => (order.price, total + by),
             ModifyKind::NewPrice { price } => (price, total),
@@ -408,8 +416,8 @@ impl Scenario {
 /// order on `side` at that price rests rather than trades.
 fn passive_price(side: Side, price: Price, book: &ReferenceBook) -> Price {
     match side {
-        Side::Buy => book.best_ask().map_or(price, |ask| price.min(ask - 1)),
-        Side::Sell => book.best_bid().map_or(price, |bid| price.max(bid + 1)),
+        Side::Buy => book.best_ask().map_or(price, |ask| price.min(ask - Price::ONE_TICK)),
+        Side::Sell => book.best_bid().map_or(price, |bid| price.max(bid + Price::ONE_TICK)),
     }
 }
 
@@ -471,9 +479,9 @@ fn check_lookups_agree(
         prop_assert_eq!(production.order(order.order_id), Some(*order));
     }
     if let Some(id) = step_id {
-        prop_assert_eq!(production.order(id), reference.order(id), "order({:#x})", id);
+        prop_assert_eq!(production.order(id), reference.order(id), "order({:#x})", id.get());
     }
-    for account in 1..=4 {
+    for account in (1..=4).map(AccountId::new) {
         let own = |side| {
             let orders = resting.iter().filter(|o| account_of(o.order_id) == account && o.side == side);
             orders.map(|o| o.qty).sum::<Qty>()

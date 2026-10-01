@@ -199,8 +199,8 @@ use k256::sha2::{Digest, Sha256};
 
 use super::profile::{Market, POLYMARKET, Profile, pick};
 use super::{
-    Clients, DOLLAR, ENGINE_CAPACITY, FlowPlan, HIGH_LEVERAGE_BASE, Item, Jump, MAKER_BASE, PlanConfig,
-    SetupPhases, TAKER_BASE, stream,
+    Clients, ENGINE_CAPACITY, FlowPlan, HIGH_LEVERAGE_BASE, Item, Jump, MAKER_BASE, PlanConfig, SetupPhases,
+    TAKER_BASE, dollars, stream,
 };
 use crate::SplitMix64;
 
@@ -249,12 +249,12 @@ pub fn fees_ppm(max_leverage: u16) -> (i32, i32) {
 pub fn market_params(market: &Market) -> SetMarketParams {
     let (taker_fee_ppm, maker_fee_ppm) = fees_ppm(market.max_leverage);
     SetMarketParams {
-        min_price: market.start_price / 2,
-        max_price: 2 * market.start_price,
+        min_price: Price::new(market.start_price / 2),
+        max_price: Price::new(2 * market.start_price),
         maker_fee_ppm,
         taker_fee_ppm,
         price_band_ppm: band_ppm(market.max_leverage),
-        market: market.id,
+        market: market.market_id(),
         max_leverage: market.max_leverage,
     }
 }
@@ -262,8 +262,9 @@ pub fn market_params(market: &Market) -> SetMarketParams {
 // ---------------------------------------------------------------------------------------
 // Accounts.
 
-/// The cascade cohort's accounts are 7,001 onwards (the M3 flow's thin layer's ids).
-pub const CASCADE_BASE: AccountId = 7_001;
+/// The cascade cohort's accounts are 7,001 onwards (the M3 flow's thin layer's ids): a base
+/// account number, as the M3 flow's are.
+pub const CASCADE_BASE: u32 = 7_001;
 
 /// Which cohort an account belongs to, with what the flow needs to know about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -325,8 +326,8 @@ impl ShockConfig {
             size: ShockSize::Calibrated,
             spread_ns: u64::from(POLYMARKET.shocks.spread_ms_p50) * 1_000_000,
             cascade_per_market: 0,
-            cascade_notional: 5_000 * DOLLAR,
-            cascade_deposit: 1_000_000 * DOLLAR,
+            cascade_notional: dollars(5_000),
+            cascade_deposit: dollars(1_000_000),
         }
     }
 
@@ -404,17 +405,17 @@ impl Default for PolymarketConfig {
             makers: 60,
             makers_per_market: 3,
             makers_k: None,
-            maker_deposit: 1_000_000_000 * DOLLAR,
+            maker_deposit: dollars(1_000_000_000),
             maker_leverage: 5,
             takers: 1_000,
-            taker_deposit: 10_000_000 * DOLLAR,
+            taker_deposit: dollars(10_000_000),
             jump_one_in: POLYMARKET.jumps.one_in_market_seconds,
             high_leverage_per_market: 2,
-            high_leverage_notional: 2_000 * DOLLAR,
+            high_leverage_notional: dollars(2_000),
             high_leverage_setup_iocs: 3,
             high_leverage_ppm: 100,
-            high_leverage_deposit: 100_000 * DOLLAR,
-            fund_deposit: 1_000 * DOLLAR,
+            high_leverage_deposit: dollars(100_000),
+            fund_deposit: dollars(1_000),
             shock: None,
         }
     }
@@ -431,14 +432,14 @@ impl PolymarketConfig {
         self.makers_k.unwrap_or(self.makers)
     }
 
-    /// The makers of each market, by index (in id order): its first account and how many
-    /// (module docs, "Makers"). With `makers_k`, all `K` quote every market. Otherwise the
+    /// The makers of each market, by index (in id order): its first account's number and how
+    /// many (module docs, "Makers"). With `makers_k`, all `K` quote every market. Otherwise the
     /// markets are dealt to the `makers / makers_per_market` groups heaviest first, by maker
     /// weight, each to the group with the least weight so far (the lowest group on a tie), so
     /// that the groups carry about the same share of maker messages (within 4% for the
     /// default 20); group `g` is makers `g × makers_per_market` onwards (0-based).
     /// O(M log M + M × G) for `M` markets and `G` groups.
-    pub fn market_makers(&self) -> Vec<(AccountId, u32)> {
+    pub fn market_makers(&self) -> Vec<(u32, u32)> {
         let markets = self.markets();
         if let Some(k) = self.makers_k {
             return vec![(MAKER_BASE, k); markets.len()];
@@ -490,29 +491,30 @@ impl PolymarketConfig {
     /// High-leverage account `index` (0-based): its account, its market's index and its side.
     pub fn high_leverage(&self, index: u32) -> (AccountId, usize, Side) {
         let (market, side) = Self::cohort_member(index, self.high_leverage_per_market);
-        (HIGH_LEVERAGE_BASE + index, market, side)
+        (AccountId::new(HIGH_LEVERAGE_BASE + index), market, side)
     }
 
     /// Cascade account `index` (0-based): its account, its market's index and its side.
     pub fn cascade(&self, index: u32) -> (AccountId, usize, Side) {
         let per_market = self.shock.map_or(1, |shock| shock.cascade_per_market);
         let (market, side) = Self::cohort_member(index, per_market);
-        (CASCADE_BASE + index, market, side)
+        (AccountId::new(CASCADE_BASE + index), market, side)
     }
 
     /// The cohort of `account`, or `None` if the flow doesn't use it.
     pub fn cohort_of(&self, account: AccountId) -> Option<Cohort> {
-        let market_id = |index: usize| self.markets()[index].id;
-        let in_cohort = |base: AccountId, count: u32| (base..base + count).contains(&account);
+        let market_id = |index: usize| self.markets()[index].market_id();
+        let number = account.get();
+        let in_cohort = |base: u32, count: u32| (base..base + count).contains(&number);
         if in_cohort(MAKER_BASE, self.maker_accounts()) {
-            Some(Cohort::Maker { index: account - MAKER_BASE })
+            Some(Cohort::Maker { index: number - MAKER_BASE })
         } else if in_cohort(TAKER_BASE, self.takers) {
             Some(Cohort::Taker)
         } else if in_cohort(HIGH_LEVERAGE_BASE, self.high_leverage_accounts()) {
-            let (_, market, side) = self.high_leverage(account - HIGH_LEVERAGE_BASE);
+            let (_, market, side) = self.high_leverage(number - HIGH_LEVERAGE_BASE);
             Some(Cohort::HighLeverage { market: market_id(market), side })
         } else if in_cohort(CASCADE_BASE, self.cascade_accounts()) {
-            let (_, market, side) = self.cascade(account - CASCADE_BASE);
+            let (_, market, side) = self.cascade(number - CASCADE_BASE);
             Some(Cohort::Cascade { market: market_id(market), side })
         } else {
             None
@@ -525,7 +527,7 @@ impl PolymarketConfig {
             Cohort::Maker { .. } => self.maker_deposit,
             Cohort::Taker => self.taker_deposit,
             Cohort::HighLeverage { .. } => self.high_leverage_deposit,
-            Cohort::Cascade { .. } => self.shock.map_or(0, |shock| shock.cascade_deposit),
+            Cohort::Cascade { .. } => self.shock.map_or(Micros::ZERO, |shock| shock.cascade_deposit),
         }
     }
 
@@ -583,8 +585,8 @@ impl PolymarketConfig {
         let shock_ok = c.shock.is_none_or(|shock| {
             shock.spread_ns < shock.every_ns / 2
                 && shock.cascade_per_market <= 100
-                && (shock.cascade_per_market == 0 || shock.cascade_notional >= 10 * DOLLAR)
-                && shock.cascade_deposit > 0
+                && (shock.cascade_per_market == 0 || shock.cascade_notional >= dollars(10))
+                && shock.cascade_deposit > Micros::ZERO
         });
         let rules = [
             // Up to 10M, a taker tick's chance stays below 1 (54% at 10M).
@@ -615,7 +617,7 @@ impl PolymarketConfig {
                 c.high_leverage_per_market == 0
                     || ((1..u64::from(POLYMARKET.takers.share_of_messages_ppm))
                         .contains(&c.high_leverage_ppm)
-                        && c.high_leverage_notional >= 10 * DOLLAR),
+                        && c.high_leverage_notional >= dollars(10)),
                 "high-leverage adds of 1 to 694 ppm of the messages, of at least $10",
             ),
             (
@@ -626,7 +628,7 @@ impl PolymarketConfig {
             (
                 [c.maker_deposit, c.taker_deposit, c.high_leverage_deposit, c.fund_deposit]
                     .iter()
-                    .all(|&d| d > 0),
+                    .all(|&d| d > Micros::ZERO),
                 "deposits above zero",
             ),
         ];
@@ -683,8 +685,8 @@ impl PolymarketConfig {
                     size,
                     spread_ns,
                     u64::from(cascade_per_market),
-                    cascade_notional as u64,
-                    cascade_deposit as u64,
+                    cascade_notional.micros() as u64,
+                    cascade_deposit.micros() as u64,
                 ]
             }
         };
@@ -696,17 +698,17 @@ impl PolymarketConfig {
             u64::from(makers_per_market),
             makers_k[0],
             makers_k[1],
-            maker_deposit as u64,
+            maker_deposit.micros() as u64,
             u64::from(maker_leverage),
             u64::from(takers),
-            taker_deposit as u64,
+            taker_deposit.micros() as u64,
             jump_one_in,
             u64::from(high_leverage_per_market),
-            high_leverage_notional as u64,
+            high_leverage_notional.micros() as u64,
             u64::from(high_leverage_setup_iocs),
             high_leverage_ppm,
-            high_leverage_deposit as u64,
-            fund_deposit as u64,
+            high_leverage_deposit.micros() as u64,
+            fund_deposit.micros() as u64,
         ];
         let mut hasher = Sha256::new();
         hasher.update(b"perps-loadgen polymarket flow");
@@ -721,11 +723,11 @@ impl PolymarketConfig {
     /// Every client account, in id order: the makers, the takers, the high-leverage accounts
     /// and the cascade cohort. Each needs a key (14.8). Not the fund, which can't trade.
     pub fn client_accounts(&self) -> Vec<AccountId> {
-        let mut accounts: Vec<AccountId> = (MAKER_BASE..MAKER_BASE + self.maker_accounts()).collect();
-        accounts.extend(TAKER_BASE..TAKER_BASE + self.takers);
-        accounts.extend(HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + self.high_leverage_accounts());
-        accounts.extend(CASCADE_BASE..CASCADE_BASE + self.cascade_accounts());
-        accounts
+        let mut numbers: Vec<u32> = (MAKER_BASE..MAKER_BASE + self.maker_accounts()).collect();
+        numbers.extend(TAKER_BASE..TAKER_BASE + self.takers);
+        numbers.extend(HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + self.high_leverage_accounts());
+        numbers.extend(CASCADE_BASE..CASCADE_BASE + self.cascade_accounts());
+        numbers.into_iter().map(AccountId::new).collect()
     }
 }
 
@@ -904,7 +906,7 @@ impl PolymarketFlow {
         if let Err(problem) = config.check() {
             panic!("{problem}");
         }
-        let highest_account = config.client_accounts().last().copied().unwrap_or(0);
+        let highest_account = config.client_accounts().last().copied().unwrap_or(AccountId::new(0));
         let running_sums = |weight: fn(&Market) -> u32| -> Vec<u32> {
             let mut sum = 0;
             config
@@ -969,9 +971,10 @@ impl PolymarketFlow {
         for (index, market) in self.markets.iter_mut().enumerate() {
             let (first, count) = market_makers[index];
             let turn = index as u32;
-            let bid_makers: Vec<AccountId> = (0..levels).map(|rank| first + (rank + turn) % count).collect();
+            let bid_makers: Vec<AccountId> =
+                (0..levels).map(|rank| AccountId::new(first + (rank + turn) % count)).collect();
             let ask_makers: Vec<AccountId> =
-                (0..levels).map(|rank| first + (rank + 1 + turn) % count).collect();
+                (0..levels).map(|rank| AccountId::new(first + (rank + 1 + turn) % count)).collect();
             market.build(&bid_makers, &ask_makers, &mut self.clients, &mut out);
         }
         out
@@ -1003,7 +1006,7 @@ impl PolymarketFlow {
     /// Account `CASCADE_BASE + index` enters: an IOC on its side.
     fn cascade_ioc(&mut self, index: u32) -> Item {
         let (account, market, side) = self.config.cascade(index);
-        let notional = self.config.shock.map_or(0, |shock| shock.cascade_notional);
+        let notional = self.config.shock.map_or(Micros::ZERO, |shock| shock.cascade_notional);
         let order = self.markets[market].ioc(side, notional);
         self.clients.place(account, order).1
     }
@@ -1110,7 +1113,7 @@ impl PolymarketFlow {
     fn record_jump(&mut self, index: u32, from: Price) {
         let market = &self.markets[index as usize];
         let jump =
-            Jump { item: self.emitted, flow_ns: self.flow_ns, market: market.spec.id, from, to: market.fair };
+            Jump { item: self.emitted, flow_ns: self.flow_ns, market: market.id(), from, to: market.fair };
         self.jumps.push(jump);
     }
 
@@ -1119,7 +1122,8 @@ impl PolymarketFlow {
     fn taker_order(&mut self, account: AccountId, index: usize, buy: bool) {
         let market = &self.markets[index];
         let cents = draw_taker_cents(&mut self.taker_stream);
-        let notional = (cents as Micros * 10_000).min(market.spec.max_notional);
+        // A cent is 10,000 micros.
+        let notional = Micros::new(cents as i64 * 10_000).min(Micros::new(market.spec.max_notional));
         let side = if buy { Side::Buy } else { Side::Sell };
         let order = market.ioc(side, notional);
         let (_, item) = self.clients.place(account, order);
@@ -1133,7 +1137,7 @@ impl PolymarketFlow {
         let takers = &POLYMARKET.takers;
         let rng = &mut self.taker_stream;
         let size = pick(takers.cluster_size_ppm, rng) as u32 + 1;
-        let account = TAKER_BASE + rng.below(u64::from(self.config.takers)) as AccountId;
+        let account = AccountId::new(TAKER_BASE + rng.below(u64::from(self.config.takers)) as u32);
         let market = pick_by_running_sums(&self.taker_weights, rng);
         let buy = rng.below(MILLION) < u64::from(takers.buy_ppm);
         self.taker_order(account, market, buy);
@@ -1307,20 +1311,22 @@ fn draw_shock_sigmas_milli(rng: &mut SplitMix64) -> u32 {
 /// Setup A (module docs, "Phases").
 fn setup_a(config: &PolymarketConfig) -> Vec<Item> {
     let mut commands = Vec::new();
-    for market in config.markets() {
-        commands.push(Command::SetMarketParams(market_params(market)));
-        let count = market.tiers.len() as u8;
-        for (index, tier) in market.tiers.iter().enumerate() {
+    for spec in config.markets() {
+        let market = spec.market_id();
+        commands.push(Command::SetMarketParams(market_params(spec)));
+        let count = spec.tiers.len() as u8;
+        for (index, tier) in spec.tiers.iter().enumerate() {
             let row = SetRiskTier {
-                lower_bound: tier.lower_bound,
-                market: market.id,
+                lower_bound: Micros::new(tier.lower_bound),
+                market,
                 max_leverage: tier.max_leverage,
                 index: index as u8,
                 count,
             };
             commands.push(Command::SetRiskTier(row));
         }
-        commands.push(Command::SetMark(SetMark { price: market.start_price, market: market.id }));
+        let start_price = Price::new(spec.start_price);
+        commands.push(Command::SetMark(SetMark { price: start_price, market }));
     }
     commands.push(Command::Deposit(Deposit { amount: config.fund_deposit, account: FUND }));
     let accounts = config.client_accounts();
@@ -1331,12 +1337,14 @@ fn setup_a(config: &PolymarketConfig) -> Vec<Item> {
     // Each maker in every market it quotes, in account order, then market order.
     let market_makers = config.market_makers();
     for maker in 0..config.maker_accounts() {
-        let account = MAKER_BASE + maker;
-        for (index, market) in config.markets().iter().enumerate() {
+        let number = MAKER_BASE + maker;
+        let account = AccountId::new(number);
+        for (index, spec) in config.markets().iter().enumerate() {
             let (first, count) = market_makers[index];
-            if (first..first + count).contains(&account) {
-                let leverage = config.maker_leverage.min(market.max_leverage);
-                commands.push(Command::SetLeverage(SetLeverage { account, market: market.id, leverage }));
+            if (first..first + count).contains(&number) {
+                let leverage = config.maker_leverage.min(spec.max_leverage);
+                let market = spec.market_id();
+                commands.push(Command::SetLeverage(SetLeverage { account, market, leverage }));
             }
         }
     }

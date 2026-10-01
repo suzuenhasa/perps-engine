@@ -106,5 +106,5 @@ use engine::types::AccountId;
 /// routes each message by it, and each gateway holds the keys and nonces of its own
 /// accounts only.
 pub fn gateway_of(account: AccountId, gateways: usize) -> usize {
-    account as usize % gateways
+    account.get() as usize % gateways
 }

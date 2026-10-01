@@ -111,9 +111,9 @@ impl Sender {
         let t_sched = self.clock.now();
         if is_client(command) {
             let account = client_account(command);
-            self.nonces[account as usize] += 1;
-            let nonce = self.nonces[account as usize];
-            let lane = account as usize % LANES;
+            self.nonces[account.index()] += 1;
+            let nonce = self.nonces[account.index()];
+            let lane = account.get() as usize % LANES;
             let record = self.client_record(command, account, lane, nonce, t_sched);
             let ring = &mut self.lanes[lane];
             while ring.free(1) == 0 {
@@ -301,7 +301,7 @@ fn a_pre_verified_run_is_gated_by_the_journal_and_replays_identically() {
     // The nonce table is each account's last nonce, and the fund's equity adds up.
     let replayed = replay(&dir.join("journal"), &recovered, None, false).expect("replayed");
     for (account, &last) in nonces.iter().enumerate().skip(1) {
-        assert_eq!(replayed.nonces.get(account as AccountId), last, "account {account}");
+        assert_eq!(replayed.nonces.get(AccountId::new(account as u32)), last, "account {account}");
     }
     let snapshot = output.engine.snapshot();
     assert_eq!(output.stats.fund.final_equity, i128::from(snapshot.fund_balance) + snapshot.fund_upnl_total);

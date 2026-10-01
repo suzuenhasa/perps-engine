@@ -12,6 +12,10 @@
 //! seam: running totals against the book, the index walk against the naive scan. It also
 //! checks the command properties of RISK.md 12 (I12, I13, I14, I17 to I20) with formulas of
 //! its own (`command_properties.rs`).
+//!
+//! **Numbers.** The helpers that build commands and events take bare numbers, in the unit
+//! their parameter names (ticks, lots, micros), so a test's expected events read like
+//! RISK.md's tables; `px`, `lots` and `micros` give any other number its unit.
 
 use super::*;
 use crate::book::{Book, OrderBook};
@@ -23,16 +27,16 @@ use crate::event::{Ack, CancelReason, Cancelled, Fill, LeverageSet, MarkPrice, M
 use crate::mode::{Fast, Naive, NaiveLiquidation, NaiveTotals};
 use crate::money::{Tier, max_qty};
 use crate::reference::ReferenceBook;
-use crate::types::{Price, Qty, Side, TimeInForce, account_of, order_id};
+use crate::types::{OrderSeq, Price, Qty, Side, TimeInForce, account_of, order_id};
 
 mod command_properties;
 mod liquidation_tests;
 
-const MARKET: MarketId = 1;
-const A: AccountId = 1;
-const B: AccountId = 2;
-const C: AccountId = 3;
-const D: AccountId = 4;
+const MARKET: MarketId = MarketId::new(1);
+const A: AccountId = AccountId::new(1);
+const B: AccountId = AccountId::new(2);
+const C: AccountId = AccountId::new(3);
+const D: AccountId = AccountId::new(4);
 
 // ---------------------------------------------------------------------------------------
 // The harness.
@@ -99,8 +103,9 @@ impl Harness {
     }
 
     /// Sets one slot directly in all four engines (`Engine::set_slot_for_test`), for a state
-    /// that commands can't reach.
-    fn set_slot_for_test(&mut self, account: AccountId, pos: Qty, cost: Micros, locked: Micros) {
+    /// that commands can't reach: `pos` lots, `cost` and `locked` micros.
+    fn set_slot_for_test(&mut self, account: AccountId, pos: i64, cost: i64, locked: i64) {
+        let (pos, cost, locked) = (lots(pos), micros(cost), micros(locked));
         self.fast.set_slot_for_test(MARKET, account, pos, cost, locked);
         self.naive.set_slot_for_test(MARKET, account, pos, cost, locked);
         self.naive_totals.set_slot_for_test(MARKET, account, pos, cost, locked);
@@ -137,7 +142,7 @@ impl Harness {
     }
 
     fn free(&self, account: AccountId) -> Micros {
-        self.snapshot().accounts.iter().find(|a| a.account == account).map_or(0, |a| a.free)
+        self.snapshot().accounts.iter().find(|a| a.account == account).map_or(Micros::ZERO, |a| a.free)
     }
 
     fn fees_collected(&self) -> Micros {
@@ -164,27 +169,45 @@ fn reject_of(command: &Command, reason: RejectReason) -> Event {
         Command::PlaceOrder(o) => (o.order_id, account_of(o.order_id)),
         Command::CancelOrder(c) => (c.order_id, account_of(c.order_id)),
         Command::ModifyOrder(m) => (m.order_id, account_of(m.order_id)),
-        Command::Deposit(d) => (0, d.account),
-        Command::Withdraw(w) => (0, w.account),
-        Command::SetLeverage(l) => (0, l.account),
-        Command::SetMark(_) | Command::SetMarketParams(_) | Command::SetRiskTier(_) => (0, AccountId::MAX),
+        Command::Deposit(d) => (OrderId::new(0), d.account),
+        Command::Withdraw(w) => (OrderId::new(0), w.account),
+        Command::SetLeverage(l) => (OrderId::new(0), l.account),
+        Command::SetMark(_) | Command::SetMarketParams(_) | Command::SetRiskTier(_) => {
+            (OrderId::new(0), AccountId::MAX)
+        }
     };
     Event::Reject(Reject { order_id, account, reason })
 }
 
 // ---------------------------------------------------------------------------------------
+// Units.
+
+fn px(ticks: i64) -> Price {
+    Price::new(ticks)
+}
+
+fn lots(lots: i64) -> Qty {
+    Qty::new(lots)
+}
+
+fn micros(micros: i64) -> Micros {
+    Micros::new(micros)
+}
+
+// ---------------------------------------------------------------------------------------
 // Commands. Every test market is market 1 with `min_price` 1,000 (RISK.md 13).
 
+/// Market 1's parameters, with `max_price` in ticks.
 fn params(
-    max_price: Price,
+    max_price: i64,
     maker_fee_ppm: i32,
     taker_fee_ppm: i32,
     price_band_ppm: u32,
     max_leverage: u16,
 ) -> SetMarketParams {
     SetMarketParams {
-        min_price: 1_000,
-        max_price,
+        min_price: px(1_000),
+        max_price: px(max_price),
         maker_fee_ppm,
         taker_fee_ppm,
         price_band_ppm,
@@ -196,11 +219,11 @@ fn params(
 /// SP500's live parameters (Polymarket, 2026-09-29), with the largest band band rule 1
 /// allows at 50x and the `min_price` band rule 2 then needs (RISK.md 5.3).
 fn sp500_params() -> SetMarketParams {
-    SetMarketParams { min_price: 1_004, ..params(150_000, 125, 400, 8_600, 50) }
+    SetMarketParams { min_price: px(1_004), ..params(150_000, 125, 400, 8_600, 50) }
 }
 
-/// SP500's live tier table, in micros.
-const SP500_TIERS: [(Micros, u16); 8] = [
+/// SP500's live tier table: each row's lower bound in micros, and its maximum leverage.
+const SP500_TIERS: [(i64, u16); 8] = [
     (0, 50),
     (500_000_000_000, 25),
     (1_000_000_000_000, 20),
@@ -215,7 +238,9 @@ fn market_params(params: SetMarketParams) -> Command {
     Command::SetMarketParams(params)
 }
 
-fn tier_row(index: u8, count: u8, lower_bound: Micros, max_leverage: u16) -> Command {
+/// Row `index` of a `count`-row table, from `lower_bound` micros.
+fn tier_row(index: u8, count: u8, lower_bound: i64, max_leverage: u16) -> Command {
+    let lower_bound = micros(lower_bound);
     Command::SetRiskTier(SetRiskTier { lower_bound, market: MARKET, max_leverage, index, count })
 }
 
@@ -227,7 +252,7 @@ fn one_tier(max_leverage: u16) -> Command {
 /// Row `index` of SP500's 8-row table.
 fn sp500_tier_row(index: u8) -> SetRiskTier {
     let (lower_bound, max_leverage) = SP500_TIERS[usize::from(index)];
-    SetRiskTier { lower_bound, market: MARKET, max_leverage, index, count: 8 }
+    SetRiskTier { lower_bound: micros(lower_bound), market: MARKET, max_leverage, index, count: 8 }
 }
 
 /// The 8 rows of SP500's table.
@@ -235,28 +260,31 @@ fn sp500_tier_rows() -> Vec<Command> {
     (0..8).map(|index| Command::SetRiskTier(sp500_tier_row(index))).collect()
 }
 
-fn deposit(account: AccountId, amount: Micros) -> Command {
-    Command::Deposit(Deposit { amount, account })
+/// A deposit of `amount` micros.
+fn deposit(account: AccountId, amount: i64) -> Command {
+    Command::Deposit(Deposit { amount: micros(amount), account })
 }
 
-fn withdraw(account: AccountId, amount: Micros) -> Command {
-    Command::Withdraw(Withdraw { amount, account })
+/// A withdrawal of `amount` micros.
+fn withdraw(account: AccountId, amount: i64) -> Command {
+    Command::Withdraw(Withdraw { amount: micros(amount), account })
 }
 
 fn leverage(account: AccountId, leverage: u16) -> Command {
     Command::SetLeverage(SetLeverage { account, market: MARKET, leverage })
 }
 
-fn mark(price: Price) -> Command {
-    Command::SetMark(SetMark { price, market: MARKET })
+/// A mark of `price` ticks.
+fn mark(price: i64) -> Command {
+    Command::SetMark(SetMark { price: px(price), market: MARKET })
 }
 
-/// A GTC limit order `account#seq` in market 1.
-fn place(account: AccountId, seq: u32, side: Side, price: Price, qty: Qty) -> PlaceOrder {
+/// A GTC limit order `account#seq` in market 1, of `qty` lots at `price` ticks.
+fn place(account: AccountId, seq: u32, side: Side, price: i64, qty: i64) -> PlaceOrder {
     PlaceOrder {
-        order_id: order_id(account, seq),
-        price,
-        qty,
+        order_id: order_id(account, OrderSeq::new(seq)),
+        price: px(price),
+        qty: lots(qty),
         market: MARKET,
         side,
         tif: TimeInForce::Gtc,
@@ -264,23 +292,24 @@ fn place(account: AccountId, seq: u32, side: Side, price: Price, qty: Qty) -> Pl
     }
 }
 
-fn buy(account: AccountId, seq: u32, price: Price, qty: Qty) -> Command {
+fn buy(account: AccountId, seq: u32, price: i64, qty: i64) -> Command {
     Command::PlaceOrder(place(account, seq, Side::Buy, price, qty))
 }
 
-fn sell(account: AccountId, seq: u32, price: Price, qty: Qty) -> Command {
+fn sell(account: AccountId, seq: u32, price: i64, qty: i64) -> Command {
     Command::PlaceOrder(place(account, seq, Side::Sell, price, qty))
 }
 
 fn cancel(account: AccountId, seq: u32) -> Command {
-    Command::CancelOrder(CancelOrder { order_id: order_id(account, seq), market: MARKET })
+    Command::CancelOrder(CancelOrder { order_id: order_id(account, OrderSeq::new(seq)), market: MARKET })
 }
 
-fn modify(account: AccountId, seq: u32, new_price: Price, new_size: Qty) -> Command {
+/// A modify to a total size of `new_size` lots at `new_price` ticks.
+fn modify(account: AccountId, seq: u32, new_price: i64, new_size: i64) -> Command {
     Command::ModifyOrder(ModifyOrder {
-        order_id: order_id(account, seq),
-        new_price,
-        new_size,
+        order_id: order_id(account, OrderSeq::new(seq)),
+        new_price: px(new_price),
+        new_size: lots(new_size),
         market: MARKET,
     })
 }
@@ -302,44 +331,62 @@ fn market_20x(maker_fee_ppm: i32, taker_fee_ppm: i32) -> Harness {
 // Events, all in market 1.
 
 fn ack(account: AccountId, seq: u32) -> Event {
-    Event::Ack(Ack { order_id: order_id(account, seq) })
+    Event::Ack(Ack { order_id: order_id(account, OrderSeq::new(seq)) })
 }
 
-fn balance(account: AccountId, free: Micros) -> Event {
-    Event::BalanceChanged(crate::event::BalanceChanged { free, account })
+/// A free balance of `free` micros.
+fn balance(account: AccountId, free: i64) -> Event {
+    Event::BalanceChanged(crate::event::BalanceChanged { free: micros(free), account })
 }
 
-fn position(account: AccountId, position: Qty, cost_basis: Micros, locked: Micros) -> Event {
-    Event::PositionChanged(PositionChanged { position, cost_basis, locked, account, market: MARKET })
+/// A slot of `position` lots, with `cost_basis` and `locked` in micros.
+fn position(account: AccountId, position: i64, cost_basis: i64, locked: i64) -> Event {
+    Event::PositionChanged(PositionChanged {
+        position: lots(position),
+        cost_basis: micros(cost_basis),
+        locked: micros(locked),
+        account,
+        market: MARKET,
+    })
 }
 
-/// A fill of `taker` (whose side is `taker_side`) against `maker`, each an `(account, seq)`.
+/// A fill of `taker` (whose side is `taker_side`) against `maker`, each an `(account, seq)`:
+/// `qty` lots at `price` ticks, with the two fees in micros.
 fn fill(
     maker: (AccountId, u32),
     taker: (AccountId, u32),
-    price: Price,
-    qty: Qty,
-    (maker_fee, taker_fee): (Micros, Micros),
+    price: i64,
+    qty: i64,
+    (maker_fee, taker_fee): (i64, i64),
     taker_side: Side,
 ) -> Event {
     Event::Fill(Fill {
-        maker_order: order_id(maker.0, maker.1),
-        taker_order: order_id(taker.0, taker.1),
-        price,
-        qty,
-        maker_fee,
-        taker_fee,
+        maker_order: order_id(maker.0, OrderSeq::new(maker.1)),
+        taker_order: order_id(taker.0, OrderSeq::new(taker.1)),
+        price: px(price),
+        qty: lots(qty),
+        maker_fee: micros(maker_fee),
+        taker_fee: micros(taker_fee),
         market: MARKET,
         taker_side,
     })
 }
 
-fn cancelled(account: AccountId, seq: u32, remaining: Qty, side: Side, reason: CancelReason) -> Event {
-    Event::Cancelled(Cancelled { order_id: order_id(account, seq), remaining, market: MARKET, reason, side })
+/// A cancel of `account#seq` with `remaining` lots unfilled.
+fn cancelled(account: AccountId, seq: u32, remaining: i64, side: Side, reason: CancelReason) -> Event {
+    Event::Cancelled(Cancelled {
+        order_id: order_id(account, OrderSeq::new(seq)),
+        remaining: lots(remaining),
+        market: MARKET,
+        reason,
+        side,
+    })
 }
 
-fn modified(account: AccountId, seq: u32, price: Price, qty: Qty) -> Event {
-    Event::Modified(Modified { order_id: order_id(account, seq), price, qty, market: MARKET })
+/// A modify that left `qty` lots to fill at `price` ticks.
+fn modified(account: AccountId, seq: u32, price: i64, qty: i64) -> Event {
+    let order_id = order_id(account, OrderSeq::new(seq));
+    Event::Modified(Modified { order_id, price: px(price), qty: lots(qty), market: MARKET })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -414,7 +461,7 @@ fn t3_a_margin_called_slot_with_no_free_balance_can_close_and_it_fills() {
             balance(A, 3_419_800),
         ]
     );
-    assert_eq!(h.fees_collected(), 105_263);
+    assert_eq!(h.fees_collected(), micros(105_263));
 }
 
 #[test]
@@ -426,7 +473,10 @@ fn t5_a_collusive_flip_is_rejected_and_the_fund_is_unchanged() {
     h.accept(sell(C, 1, 102_000, 1_000));
     h.accept(buy(A, 1, 102_000, 1_000));
     let a = h.slot(A);
-    assert_eq!((a.pos, a.cost, a.locked, h.free(A)), (1_000, 102_000_000, 5_000_000, 0));
+    assert_eq!(
+        (a.pos, a.cost, a.locked, h.free(A)),
+        (lots(1_000), micros(102_000_000), micros(5_000_000), Micros::ZERO)
+    );
     // 2. The colluder bids at the lower edge; its short covers the bid, so no top-up.
     assert_eq!(h.accept(buy(C, 2, 98_000, 2_000)), vec![ack(C, 2)]);
     // 3. A tries to flip into it: W' stays 1,000, but the flip is not strictly reducing, so
@@ -442,19 +492,19 @@ fn t5_a_collusive_flip_is_rejected_and_the_fund_is_unchanged() {
 #[test]
 fn a_rejected_order_keeps_its_sequence_and_an_accepted_one_blocks_it_in_every_market() {
     let mut h = market_20x(0, 0);
-    let market_2 = SetMarketParams { market: 2, ..params(1_000_000, 0, 0, 20_000, 20) };
+    let market_2 = SetMarketParams { market: MarketId::new(2), ..params(1_000_000, 0, 0, 20_000, 20) };
     h.accept(market_params(market_2));
     h.accept(Command::SetRiskTier(SetRiskTier {
-        lower_bound: 0,
-        market: 2,
+        lower_bound: Micros::ZERO,
+        market: MarketId::new(2),
         max_leverage: 20,
         index: 0,
         count: 1,
     }));
-    h.accept(Command::SetMark(SetMark { price: 100_000, market: 2 }));
+    h.accept(Command::SetMark(SetMark { price: px(100_000), market: MarketId::new(2) }));
     h.accept_all([deposit(A, 1_000_000_000), mark(100_000)]);
     let in_market_2 = |command: Command| match command {
-        Command::PlaceOrder(order) => Command::PlaceOrder(PlaceOrder { market: 2, ..order }),
+        Command::PlaceOrder(order) => Command::PlaceOrder(PlaceOrder { market: MarketId::new(2), ..order }),
         _ => unreachable!(),
     };
 
@@ -478,14 +528,15 @@ fn an_order_failing_several_checks_gets_the_first_reason_and_changes_nothing() {
     let mut h = market_20x(0, 0);
     h.accept_all([deposit(A, 1_000_000_000), deposit(B, 1_000_000_000), mark(100_000)]);
     h.accept(sell(B, 1, 100_500, 10));
-    let limit = max_qty(1_000_000);
+    let limit = max_qty(px(1_000_000)).lots();
     let post_only = |command: Command| match command {
         Command::PlaceOrder(order) => Command::PlaceOrder(PlaceOrder { post_only: true, ..order }),
         _ => unreachable!(),
     };
 
     // Each order fails the check named and every check after it (RISK.md 6.1's order).
-    let fund_order = PlaceOrder { market: 9, qty: 0, ..place(FUND, 1, Side::Buy, 0, 0) };
+    let fund_order =
+        PlaceOrder { market: MarketId::new(9), qty: Qty::ZERO, ..place(FUND, 1, Side::Buy, 0, 0) };
     h.assert_rejected(Command::PlaceOrder(fund_order), RejectReason::UnknownMarket);
     h.assert_rejected(
         Command::PlaceOrder(PlaceOrder { market: MARKET, ..fund_order }),
@@ -517,7 +568,12 @@ fn a_modify_failing_several_checks_gets_the_first_reason_and_changes_nothing() {
     let a_post_only = PlaceOrder { post_only: true, ..place(A, 2, Side::Buy, 98_000, 1) };
     h.accept(Command::PlaceOrder(a_post_only));
 
-    let wrong_market = ModifyOrder { order_id: order_id(A, 1), new_price: 0, new_size: 0, market: 9 };
+    let wrong_market = ModifyOrder {
+        order_id: order_id(A, OrderSeq::new(1)),
+        new_price: Price::ZERO,
+        new_size: Qty::ZERO,
+        market: MarketId::new(9),
+    };
     h.assert_rejected(Command::ModifyOrder(wrong_market), RejectReason::UnknownMarket);
     h.assert_rejected(modify(A, 9, 0, 0), RejectReason::UnknownOrder);
     h.assert_rejected(modify(A, 1, 0, 0), RejectReason::InvalidQty);
@@ -530,7 +586,10 @@ fn a_modify_failing_several_checks_gets_the_first_reason_and_changes_nothing() {
 
     // A cancel is checked for its market, then for the order.
     h.assert_rejected(
-        Command::CancelOrder(CancelOrder { order_id: order_id(A, 1), market: 9 }),
+        Command::CancelOrder(CancelOrder {
+            order_id: order_id(A, OrderSeq::new(1)),
+            market: MarketId::new(9),
+        }),
         RejectReason::UnknownMarket,
     );
     h.assert_rejected(cancel(A, 9), RejectReason::UnknownOrder);
@@ -548,7 +607,7 @@ fn the_fund_cannot_trade_withdraw_or_set_leverage() {
     h.assert_rejected(leverage(FUND, 20), RejectReason::ReservedAccount);
     // Its deposit went to the fund balance, not to an account.
     let snapshot = h.snapshot();
-    assert_eq!((snapshot.fund_balance, snapshot.accounts.len()), (1_000_000_000, 0));
+    assert_eq!((snapshot.fund_balance, snapshot.accounts.len()), (micros(1_000_000_000), 0));
 }
 
 #[test]
@@ -573,7 +632,10 @@ fn orders_need_a_mark_and_a_mark_needs_a_tier_table() {
     h.accept(tier_row(1, 2, 1_000_000_000_000, 10));
     h.accept(deposit(A, 1_000_000_000));
     h.assert_rejected(buy(A, 1, 99_000, 1), RejectReason::NoMark);
-    assert_eq!(h.accept(mark(100_000)), vec![Event::MarkPrice(MarkPrice { price: 100_000, market: MARKET })]);
+    assert_eq!(
+        h.accept(mark(100_000)),
+        vec![Event::MarkPrice(MarkPrice { price: px(100_000), market: MARKET })]
+    );
     h.accept(buy(A, 1, 99_000, 1));
     h.accept(cancel(A, 1));
     // New parameters clear the mark and the table, so the market must open again.
@@ -585,7 +647,8 @@ fn orders_need_a_mark_and_a_mark_needs_a_tier_table() {
 #[test]
 fn market_level_rejects_carry_the_operator_account() {
     let mut h = Harness::new();
-    let operator_reject = |reason| Event::Reject(Reject { order_id: 0, account: AccountId::MAX, reason });
+    let operator_reject =
+        |reason| Event::Reject(Reject { order_id: OrderId::new(0), account: AccountId::MAX, reason });
     assert_eq!(h.apply(mark(100_000)), vec![operator_reject(RejectReason::UnknownMarket)]);
     assert_eq!(h.apply(one_tier(20)), vec![operator_reject(RejectReason::UnknownMarket)]);
     let invalid = SetMarketParams { max_leverage: 0, ..params(1_000_000, 0, 0, 20_000, 20) };
@@ -593,7 +656,11 @@ fn market_level_rejects_carry_the_operator_account() {
     // An account command's reject carries its account.
     assert_eq!(
         h.apply(leverage(A, 1)),
-        vec![Event::Reject(Reject { order_id: 0, account: A, reason: RejectReason::UnknownMarket })]
+        vec![Event::Reject(Reject {
+            order_id: OrderId::new(0),
+            account: A,
+            reason: RejectReason::UnknownMarket
+        })]
     );
 }
 
@@ -634,7 +701,7 @@ fn set_market_params_applies_both_band_rules_with_the_larger_fee() {
     );
     // Rule 2: with that band, min_price 1,004 is the lowest.
     h.assert_rejected(
-        market_params(SetMarketParams { min_price: 1_003, ..sp500 }),
+        market_params(SetMarketParams { min_price: px(1_003), ..sp500 }),
         RejectReason::InvalidParams,
     );
     // Review L1: 1x with band and fee of 225,000 each passes rule 1, and rule 2 refuses it.
@@ -649,7 +716,7 @@ fn set_market_params_applies_both_band_rules_with_the_larger_fee() {
     // The rules use the larger of the two fees, here the maker's: with it, rule 1 allows a
     // band of 8,500 and rule 2 then needs a min_price of 1,005 (1,004 with the taker's).
     let maker_larger = SetMarketParams {
-        min_price: 1_005,
+        min_price: px(1_005),
         maker_fee_ppm: 500,
         taker_fee_ppm: 400,
         price_band_ppm: 8_500,
@@ -661,7 +728,7 @@ fn set_market_params_applies_both_band_rules_with_the_larger_fee() {
         RejectReason::InvalidParams,
     );
     h.assert_rejected(
-        market_params(SetMarketParams { min_price: 1_004, ..maker_larger }),
+        market_params(SetMarketParams { min_price: px(1_004), ..maker_larger }),
         RejectReason::InvalidParams,
     );
 }
@@ -671,12 +738,12 @@ fn set_market_params_rejects_each_invalid_field() {
     let mut h = Harness::new();
     let good = params(1_000_000, 0, 400, 20_000, 20);
     let invalid = [
-        SetMarketParams { min_price: 0, ..good },
-        SetMarketParams { min_price: 1_000_001, ..good },
+        SetMarketParams { min_price: px(0), ..good },
+        SetMarketParams { min_price: px(1_000_001), ..good },
         // The price limit 2^32, with a narrow range so the width is fine.
-        SetMarketParams { min_price: (1 << 32) - 10, max_price: 1 << 32, ..good },
+        SetMarketParams { min_price: px((1 << 32) - 10), max_price: px(1 << 32), ..good },
         // One tick wider than the book's 2^24 levels.
-        SetMarketParams { max_price: 1_000 + (1 << 24), ..good },
+        SetMarketParams { max_price: px(1_000 + (1 << 24)), ..good },
         SetMarketParams { max_leverage: 0, ..good },
         SetMarketParams { taker_fee_ppm: -1, ..good },
         SetMarketParams { maker_fee_ppm: -401, ..good },
@@ -687,7 +754,7 @@ fn set_market_params_rejects_each_invalid_field() {
         h.assert_rejected(market_params(params), RejectReason::InvalidParams);
     }
     let valid = [
-        SetMarketParams { min_price: (1 << 32) - 11, max_price: (1 << 32) - 1, ..good },
+        SetMarketParams { min_price: px((1 << 32) - 11), max_price: px((1 << 32) - 1), ..good },
         SetMarketParams { maker_fee_ppm: -400, ..good },
         SetMarketParams { taker_fee_ppm: 2_500, ..good },
     ];
@@ -714,13 +781,13 @@ fn set_market_params_needs_an_empty_market_and_keeps_its_slots_and_fees() {
         events[4..],
         [position(B, 0, 0, 0), balance(B, 999_994_206), position(A, 0, 0, 0), balance(A, 1_000_004_751)]
     );
-    assert_eq!(h.fees_collected(), 1_043);
+    assert_eq!(h.fees_collected(), micros(1_043));
 
     assert_eq!(h.accept(market_params(new_params)), vec![Event::MarketParamsSet(new_params)]);
     let snapshot = h.snapshot();
     let market = &snapshot.markets[0];
-    assert_eq!((market.mark, market.tiers.len(), market.max_qty), (None, 0, max_qty(500_000)));
-    assert_eq!(market.fees_collected, 1_043, "fees are kept");
+    assert_eq!((market.mark, market.tiers.len(), market.max_qty), (None, 0, max_qty(px(500_000))));
+    assert_eq!(market.fees_collected, micros(1_043), "fees are kept");
     assert_eq!(market.accounts, vec![A, B]);
     assert_eq!(h.slot(A).leverage, 20, "a stored leverage above the new maximum is capped by lev_eff");
 }
@@ -731,7 +798,7 @@ fn set_market_params_needs_an_empty_market_and_keeps_its_slots_and_fees() {
 #[test]
 fn a_worst_case_size_above_max_qty_is_rejected_without_overflowing() {
     let mut h = market_20x(0, 0);
-    let limit = max_qty(1_000_000);
+    let limit = max_qty(px(1_000_000)).lots();
     assert_eq!(limit, 9_007_199_254);
     // At mark 1,000 and 1x, max_qty lots need 9,007,199,254,000 of IM.
     h.accept_all([deposit(A, 10_000_000_000_000), mark(1_000)]);
@@ -790,13 +857,13 @@ fn a_tier_table_takes_effect_only_when_its_last_row_is_accepted() {
     );
     // A position too, so the commit below happens on a market with orders and positions.
     h.accept(sell(B, 1, 99_500, 10));
-    assert_eq!(h.slot(A).pos, 10);
+    assert_eq!(h.slot(A).pos, lots(10));
     h.accept_all((4..7).map(|index| Command::SetRiskTier(sp500_tier_row(index))));
     assert_eq!(h.snapshot().markets[0].tiers.len(), 1);
     h.accept(Command::SetRiskTier(sp500_tier_row(7)));
     let market = &h.snapshot().markets[0];
     assert_eq!((market.tiers.len(), market.staged_rows), (8, 0));
-    assert_eq!(market.tiers[1], Tier { lower_bound: 500_000_000_000, max_leverage: 25 });
+    assert_eq!(market.tiers[1], Tier { lower_bound: micros(500_000_000_000), max_leverage: 25 });
 
     // The next check of A's slot uses the new table: W' = 5,000,001 lots is in the 25x
     // tier, so IM(W') = 20,000,004,000 and the top-up is IM(W') minus A's equity.
@@ -833,8 +900,10 @@ fn tier_rows_out_of_order_or_inconsistent_are_rejected_and_row_0_restarts_the_ba
     h.assert_rejected(tier_row(2, 3, 2_000, 5), RejectReason::InvalidParams);
     h.accept(tier_row(1, 2, 7_000, 3));
     let market = &h.snapshot().markets[0];
-    let committed =
-        vec![Tier { lower_bound: 0, max_leverage: 15 }, Tier { lower_bound: 7_000, max_leverage: 3 }];
+    let committed = vec![
+        Tier { lower_bound: Micros::ZERO, max_leverage: 15 },
+        Tier { lower_bound: micros(7_000), max_leverage: 3 },
+    ];
     assert_eq!((&market.tiers, market.staged_rows), (&committed, 0));
 }
 
@@ -855,7 +924,7 @@ fn fees_come_out_of_locked_collateral_and_rebates_round_down_in_size() {
             position(A, 1_000, 99_500_000, 99_960_200),
         ]
     );
-    assert_eq!(h.fees_collected(), 34_825, "fees net of the rebate");
+    assert_eq!(h.fees_collected(), micros(34_825), "fees net of the rebate");
 
     // A rebate of 0.61725 micros rounds to none; the taker's 4.938 rounds up to 5.
     let mut h = market_20x(-50, 400);
@@ -945,7 +1014,7 @@ fn a_self_trade_cancel_comes_off_the_accounts_open_total() {
         ]
     );
     let a = h.slot(A);
-    assert_eq!((a.pos, a.open_buys, a.open_sells), (5, 0, 0));
+    assert_eq!((a.pos, a.open_buys, a.open_sells), (lots(5), Qty::ZERO, Qty::ZERO));
 }
 
 #[test]
@@ -997,7 +1066,7 @@ fn in_a_margin_call_decreases_and_strictly_reducing_replaces_are_accepted() {
     let a = h.slot(A);
     assert_eq!(
         (a.pos, a.cost, a.locked, a.open_buys, a.open_sells),
-        (1_050, 104_950_000, 5_500_000, 50, 100)
+        (lots(1_050), micros(104_950_000), micros(5_500_000), lots(50), lots(100))
     );
 
     // At 98,000: E = 3,450,000 is below IM(1,050) = 5,145,000 and above MM = 2,572,500.
@@ -1028,7 +1097,7 @@ fn set_leverage_raises_release_cuts_top_up_and_an_uncovered_cut_is_rejected() {
     h.accept_all([deposit(A, 10_000_000), deposit(B, 1_000_000_000), leverage(A, 10), mark(100_000)]);
     h.accept(sell(B, 1, 100_000, 1_000));
     h.accept(buy(A, 1, 100_000, 1_000));
-    assert_eq!((h.slot(A).locked, h.free(A)), (10_000_000, 0));
+    assert_eq!((h.slot(A).locked, h.free(A)), (micros(10_000_000), Micros::ZERO));
     let leverage_set = |leverage| Event::LeverageSet(LeverageSet { account: A, market: MARKET, leverage });
 
     // 20x: IM(1,000) falls to 5,000,000, and the pass releases the rest.
@@ -1056,7 +1125,7 @@ fn set_leverage_on_a_new_slot_creates_the_account_and_only_echoes() {
         vec![Event::LeverageSet(LeverageSet { account: C, market: MARKET, leverage: 7 })]
     );
     let snapshot = h.snapshot();
-    assert_eq!(snapshot.accounts, vec![AccountSnapshot { account: C, free: 0, next_seq: 0 }]);
+    assert_eq!(snapshot.accounts, vec![AccountSnapshot { account: C, free: Micros::ZERO, next_seq: 0 }]);
     assert_eq!(h.slot(C).leverage, 7);
 }
 
@@ -1081,7 +1150,7 @@ fn deposits_and_withdrawals_check_their_amounts() {
     h.assert_rejected(deposit(FUND, 1), RejectReason::InvalidAmount);
     let snapshot = h.snapshot();
     assert_eq!(snapshot.net_deposits, i128::from(i64::MAX));
-    assert_eq!(snapshot.accounts, vec![AccountSnapshot { account: A, free: 0, next_seq: 0 }]);
+    assert_eq!(snapshot.accounts, vec![AccountSnapshot { account: A, free: Micros::ZERO, next_seq: 0 }]);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1148,13 +1217,13 @@ fn set_slot_for_test_keeps_the_position_count_and_the_index_in_step() {
     engine.apply(&one_tier(20), &mut events);
     engine.apply(&mark(100_000), &mut events);
     // T1's long, on a 20x market: key 73,100.
-    engine.set_slot_for_test(MARKET, A, 100_000, 7_502_400_000, 375_120_000);
+    engine.set_slot_for_test(MARKET, A, lots(100_000), micros(7_502_400_000), micros(375_120_000));
     let market = engine.market(MARKET);
     assert_eq!(market.nonzero_positions, 1);
-    assert_eq!(market.index.first_long(), Some((73_100, A)));
+    assert_eq!(market.index.first_long(), Some((px(73_100), A)));
     // A flat slot with negative collateral: not indexed.
-    engine.set_slot_for_test(MARKET, A, 0, 0, -5);
+    engine.set_slot_for_test(MARKET, A, Qty::ZERO, Micros::ZERO, micros(-5));
     let market = engine.market(MARKET);
     assert_eq!((market.nonzero_positions, market.index.first_long()), (0, None));
-    assert_eq!(market.slot(A).locked, -5);
+    assert_eq!(market.slot(A).locked, micros(-5));
 }

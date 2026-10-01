@@ -54,7 +54,7 @@ pub mod schedule;
 pub mod sender;
 
 use engine::command::{CancelOrder, Command, ModifyOrder, PlaceOrder};
-use engine::types::{AccountId, MarketId, OrderId, Price, Qty, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
 /// SplitMix64: a tiny, well-known pseudo-random generator (Steele, Lea and Flood, 2014).
 /// Good statistical quality for simulation; not for cryptography.
@@ -84,6 +84,18 @@ impl SplitMix64 {
     /// A value in `lo..=hi`.
     pub fn in_range(&mut self, lo: i64, hi: i64) -> i64 {
         lo + self.below((hi - lo + 1) as u64) as i64
+    }
+
+    /// A quantity in `lo..=hi` lots: [`SplitMix64::in_range`] on the numbers of lots, so it
+    /// draws exactly what that draws.
+    pub fn qty_in_range(&mut self, lo: Qty, hi: Qty) -> Qty {
+        Qty::new(self.in_range(lo.lots(), hi.lots()))
+    }
+
+    /// An offset of `-max..=max` ticks, up or down from a price: [`SplitMix64::in_range`] on
+    /// the numbers of ticks.
+    pub fn ticks_within(&mut self, max: Price) -> Price {
+        Price::new(self.in_range(-max.ticks(), max.ticks()))
     }
 
     /// True with probability `percent / 100`.
@@ -116,8 +128,8 @@ pub enum Prices {
 pub struct FlowConfig {
     pub seed: u64,
     pub market: MarketId,
-    /// Accounts are numbered `1..=accounts`.
-    pub accounts: AccountId,
+    /// How many accounts: they are numbered `1..=accounts`. A count, not an account id.
+    pub accounts: u32,
     pub mid: Price,
     /// No order is priced further than this from `mid`. With the default
     /// [`Prices::Uniform`], prices are uniform in `mid - half_width ..= mid + half_width`,
@@ -149,11 +161,11 @@ impl Default for FlowConfig {
     fn default() -> Self {
         FlowConfig {
             seed: 1,
-            market: 1,
+            market: MarketId::new(1),
             accounts: 100,
-            mid: 10_000,
-            half_width: 20,
-            max_qty: 10,
+            mid: Price::new(10_000),
+            half_width: Price::new(20),
+            max_qty: Qty::new(10),
             cancel_percent: 40,
             prices: Prices::Uniform,
             modify_percent: 0,
@@ -198,11 +210,11 @@ impl FlowConfig {
     pub fn deep() -> Self {
         FlowConfig {
             seed: 1,
-            market: 1,
+            market: MarketId::new(1),
             accounts: 1_000,
-            mid: 10_000,
-            half_width: 250,
-            max_qty: 10,
+            mid: Price::new(10_000),
+            half_width: Price::new(250),
+            max_qty: Qty::new(10),
             cancel_percent: 0,
             prices: Prices::Skewed { further_tick_percent: 95 },
             modify_percent: 10,
@@ -269,11 +281,11 @@ impl SyntheticFlow {
     fn draw_offset(&mut self) -> Price {
         let half_width = self.config.half_width;
         match self.config.prices {
-            Prices::Uniform => self.rng.in_range(-half_width, half_width),
+            Prices::Uniform => self.rng.ticks_within(half_width),
             Prices::Skewed { further_tick_percent } => {
-                let mut distance = 0;
+                let mut distance = Price::ZERO;
                 while distance < half_width && self.rng.chance(further_tick_percent) {
-                    distance += 1;
+                    distance += Price::ONE_TICK;
                 }
                 distance
             }
@@ -299,11 +311,11 @@ impl SyntheticFlow {
         let c = self.config;
         // Account, offset, size and side are the M0 flow's draws, in its order. The options
         // after them draw nothing while off (`roll`), so the default stream is unchanged.
-        let account = 1 + self.rng.below(c.accounts as u64) as AccountId;
-        self.next_seq[account as usize] += 1;
-        let id = order_id(account, self.next_seq[account as usize]);
+        let account = AccountId::new(1 + self.rng.below(c.accounts as u64) as u32);
+        self.next_seq[account.index()] += 1;
+        let id = order_id(account, OrderSeq::new(self.next_seq[account.index()]));
         let offset = self.draw_offset();
-        let qty = self.rng.in_range(1, c.max_qty);
+        let qty = self.rng.qty_in_range(Qty::new(1), c.max_qty);
         let side = if self.rng.chance(50) { Side::Buy } else { Side::Sell };
         let taker = self.roll(c.ioc_percent);
         let post_only = !taker && self.roll(c.post_only_percent);
@@ -345,7 +357,7 @@ impl SyntheticFlow {
             let offset = self.draw_offset();
             order.price = self.price_at(order.side, offset, false);
         } else {
-            order.size = self.rng.in_range(1, c.max_qty);
+            order.size = self.rng.qty_in_range(Qty::new(1), c.max_qty);
         }
         self.live[i] = order;
         Command::ModifyOrder(ModifyOrder {
@@ -412,17 +424,18 @@ mod tests {
         for c in &commands {
             if let Command::PlaceOrder(p) = c {
                 assert!((config.mid - config.half_width..=config.mid + config.half_width).contains(&p.price));
-                assert!((1..=config.max_qty).contains(&p.qty));
+                assert!((Qty::new(1)..=config.max_qty).contains(&p.qty));
             }
         }
     }
 
-    fn gtc_place(account: AccountId, seq: u32, price: Price, qty: Qty) -> Command {
+    /// Account number `account`'s GTC bid of `qty` lots at `price` ticks.
+    fn gtc_place(account: u32, seq: u32, price: i64, qty: i64) -> Command {
         Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(account, seq),
-            price,
-            qty,
-            market: 1,
+            order_id: order_id(AccountId::new(account), OrderSeq::new(seq)),
+            price: Price::new(price),
+            qty: Qty::new(qty),
+            market: MarketId::new(1),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: false,
@@ -508,9 +521,10 @@ mod tests {
         let (mut near_mid, mut far_out) = (0, 0);
         for command in SyntheticFlow::new(config).take(50_000) {
             let Command::PlaceOrder(p) = command else { continue };
-            let distance = (p.price - config.mid).abs();
-            assert!(distance <= config.half_width);
-            assert!((1..=config.max_qty).contains(&p.qty));
+            // In ticks from mid.
+            let distance = (p.price - config.mid).ticks().abs();
+            assert!(distance <= config.half_width.ticks());
+            assert!((Qty::new(1)..=config.max_qty).contains(&p.qty));
             // Resting bids at or below mid, resting asks at or above; takers the other way.
             let below_mid = p.price <= config.mid;
             let above_mid = p.price >= config.mid;
@@ -551,7 +565,7 @@ mod tests {
                         assert_eq!(m.new_size, size, "a price move keeps the total size");
                         repriced += 1;
                     } else {
-                        assert!((1..=config.max_qty).contains(&m.new_size));
+                        assert!((Qty::new(1)..=config.max_qty).contains(&m.new_size));
                         resized += 1;
                     }
                     last_sent.insert(m.order_id, (m.new_price, m.new_size));
@@ -565,8 +579,11 @@ mod tests {
     #[test]
     fn the_deep_flow_keeps_thousands_of_orders_resting_on_many_levels() {
         let config = FlowConfig::deep();
-        let mut book =
-            Book::new(BookConfig { market: config.market, min_price: 1, max_price: 2 * config.mid });
+        let mut book = Book::new(BookConfig {
+            market: config.market,
+            min_price: Price::new(1),
+            max_price: Price::new(2 * config.mid.ticks()),
+        });
         let mut events: Vec<Event> = Vec::new();
         for command in SyntheticFlow::new(config).take(60_000) {
             match command {

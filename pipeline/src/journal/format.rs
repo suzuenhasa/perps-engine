@@ -56,7 +56,7 @@
 
 use engine::command::Command;
 use engine::engine::EngineOptions;
-use engine::types::{OrderId, account_of};
+use engine::types::{AccountId, OrderId, account_of};
 
 use crate::codec::decode_command;
 use crate::crc32c::{Crc32c, crc32c};
@@ -366,8 +366,9 @@ pub fn check_contents(record: &JournalRecord, mode: InjectionMode) -> Result<Com
         (Source::SignedClient | Source::PreVerifiedClient, Some(order_id)) => {
             if account_of(order_id) != record.meta.account {
                 return Err(format!(
-                    "account {} doesn't own order {order_id:#x} (its account is {})",
+                    "account {} doesn't own order {:#x} (its account is {})",
                     record.meta.account,
+                    order_id.get(),
                     account_of(order_id)
                 ));
             }
@@ -380,7 +381,7 @@ pub fn check_contents(record: &JournalRecord, mode: InjectionMode) -> Result<Com
         }
         (Source::Operator, None) => {
             let meta = record.meta;
-            if meta.lane != 0 || meta.account != 0 || record.nonce != 0 {
+            if meta.lane != 0 || meta.account != AccountId::new(0) || record.nonce != 0 {
                 return Err("an operator record whose lane, account or nonce is not 0".into());
             }
         }
@@ -424,7 +425,7 @@ mod tests {
     use crate::codec::encode_command;
     use crate::records::{Meta, SIGNATURE_WORDS, spec_examples};
     use engine::command::{CancelOrder, Deposit, PlaceOrder, SetMark};
-    use engine::types::{Side, TimeInForce, order_id};
+    use engine::types::{MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
     fn identity() -> JournalIdentity {
         JournalIdentity::new(
@@ -451,10 +452,10 @@ mod tests {
 
     fn place(account: u32, seq: u32) -> Command {
         Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(account, seq),
-            price: 102_998,
-            qty: 500_000,
-            market: 3,
+            order_id: order_id(AccountId::new(account), OrderSeq::new(seq)),
+            price: Price::new(102_998),
+            qty: Qty::new(500_000),
+            market: MarketId::new(3),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: true,
@@ -599,9 +600,9 @@ mod tests {
 
     #[test]
     fn records_must_hold_what_their_kind_allows() {
-        let signed = Meta { source: Source::SignedClient, lane: 1, account: 9 };
-        let preverified = Meta { source: Source::PreVerifiedClient, lane: 1, account: 9 };
-        let mark = Command::SetMark(SetMark { price: 1, market: 3 });
+        let signed = Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) };
+        let preverified = Meta { source: Source::PreVerifiedClient, lane: 1, account: AccountId::new(9) };
+        let mark = Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(3) });
         let check = |record: JournalRecord, mode| check_contents(&record, mode);
         use InjectionMode::{PreVerified, Signed};
 
@@ -614,11 +615,14 @@ mod tests {
         assert!(error(record(signed, 1, &place(9, 1)), PreVerified).contains("kind-1"));
         assert!(error(record(preverified, 1, &place(9, 1)), Signed).contains("kind-2"));
         assert!(error(record(signed, 1, &place(7, 1)), Signed).contains("doesn't own"));
-        let cancel = Command::CancelOrder(CancelOrder { order_id: order_id(8, 2), market: 0 });
+        let cancel = Command::CancelOrder(CancelOrder {
+            order_id: order_id(AccountId::new(8), OrderSeq::new(2)),
+            market: MarketId::new(0),
+        });
         assert!(error(record(signed, 1, &cancel), Signed).contains("doesn't own"));
         assert!(error(record(signed, 1, &mark), Signed).contains("operator command tag 7"));
         assert!(error(record(Meta::OPERATOR, 0, &place(9, 1)), Signed).contains("client command tag 1"));
-        let deposit = Command::Deposit(Deposit { amount: 1, account: 9 });
+        let deposit = Command::Deposit(Deposit { amount: Micros::new(1), account: AccountId::new(9) });
         let busy_operator = Meta { lane: 1, ..Meta::OPERATOR };
         assert!(error(record(busy_operator, 0, &deposit), Signed).contains("lane, account or nonce"));
         assert!(error(record(Meta::OPERATOR, 5, &deposit), Signed).contains("lane, account or nonce"));
@@ -630,7 +634,7 @@ mod tests {
     #[test]
     fn a_record_with_a_bad_meta_or_length_does_not_decode() {
         let mut buf = Vec::new();
-        let meta = Meta { source: Source::PreVerifiedClient, lane: 0, account: 9 };
+        let meta = Meta { source: Source::PreVerifiedClient, lane: 0, account: AccountId::new(9) };
         append_record(&mut buf, &record(meta, 1, &place(9, 1)).to_words()[..10]);
         assert!(decode_record(&buf).is_some());
         assert!(decode_record(&buf[..72]).is_none(), "too short for its kind");

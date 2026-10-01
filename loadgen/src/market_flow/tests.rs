@@ -13,6 +13,21 @@ use engine::mode::Fast;
 use engine::money::{band_edges, band_rule_1_holds, band_rule_2_holds};
 use engine::types::{account_of, sequence_of};
 
+/// A price of `ticks` ticks.
+fn px(ticks: i64) -> Price {
+    Price::new(ticks)
+}
+
+/// A quantity of `lots` lots.
+fn lots(lots: i64) -> Qty {
+    Qty::new(lots)
+}
+
+/// Account number `n`.
+fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
+
 /// Items of each kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Mix {
@@ -100,7 +115,7 @@ fn streams_follow_the_formula_of_14_6() {
 
 #[test]
 fn every_market_passes_both_band_rules_and_has_its_class() {
-    for market in 1..=67 {
+    for market in (1..=67).map(MarketId::new) {
         let params = market_params(market);
         let fee = params.maker_fee_ppm.max(params.taker_fee_ppm);
         assert!(band_rule_1_holds(params.max_leverage, params.price_band_ppm, fee), "{params:?}");
@@ -108,32 +123,44 @@ fn every_market_passes_both_band_rules_and_has_its_class() {
             band_rule_2_holds(params.min_price, params.max_leverage, params.price_band_ppm, fee),
             "{params:?}"
         );
-        let fair = 100_000 + 1_000 * Price::from(market);
-        assert_eq!((params.min_price, params.max_price), (fair / 2, 2 * fair));
+        let fair = 100_000 + 1_000 * i64::from(market.get());
+        assert_eq!((params.min_price, params.max_price), (px(fair / 2), px(2 * fair)));
     }
-    assert_eq!(market_params(3).max_leverage, 50); // class 0
-    assert_eq!(market_params(1).max_leverage, 20); // class 1
-    assert_eq!(market_params(2).max_leverage, 10); // class 2
-    assert_eq!(market_params(1).min_price, 50_500); // the smallest
+    assert_eq!(market_params(MarketId::new(3)).max_leverage, 50); // class 0
+    assert_eq!(market_params(MarketId::new(1)).max_leverage, 20); // class 1
+    assert_eq!(market_params(MarketId::new(2)).max_leverage, 10); // class 2
+    assert_eq!(market_params(MarketId::new(1)).min_price, px(50_500)); // the smallest
 }
 
 #[test]
 fn accounts_follow_the_cohorts_of_14_3() {
     let config = MarketFlowConfig::m3();
     // Account 9 is market maker 0 of market 3, as in the worked example of 5.6.
-    assert_eq!(config.maker(3, 0), 9);
-    assert_eq!(config.cohort_of(9), Some(Cohort::Maker { market: 3, index: 0 }));
-    assert_eq!(config.cohort_of(268), Some(Cohort::Maker { market: 67, index: 3 }));
-    assert_eq!(config.cohort_of(269), None);
-    assert_eq!(config.cohort_of(1_001), Some(Cohort::Taker));
-    assert_eq!(config.cohort_of(3_000), Some(Cohort::Taker));
-    assert_eq!(config.cohort_of(3_001), None);
-    assert_eq!(config.cohort_of(5_001), Some(Cohort::HighLeverage { market: 1, side: Side::Buy }));
-    assert_eq!(config.cohort_of(5_003), Some(Cohort::HighLeverage { market: 1, side: Side::Buy }));
-    assert_eq!(config.cohort_of(5_004), Some(Cohort::HighLeverage { market: 1, side: Side::Sell }));
-    assert_eq!(config.cohort_of(5_402), Some(Cohort::HighLeverage { market: 67, side: Side::Sell }));
-    assert_eq!(config.cohort_of(7_200), Some(Cohort::Thin));
-    assert_eq!(config.cohort_of(7_201), None);
+    assert_eq!(config.maker(MarketId::new(3), 0), acct(9));
+    assert_eq!(config.cohort_of(acct(9)), Some(Cohort::Maker { market: MarketId::new(3), index: 0 }));
+    assert_eq!(config.cohort_of(acct(268)), Some(Cohort::Maker { market: MarketId::new(67), index: 3 }));
+    assert_eq!(config.cohort_of(acct(269)), None);
+    assert_eq!(config.cohort_of(acct(1_001)), Some(Cohort::Taker));
+    assert_eq!(config.cohort_of(acct(3_000)), Some(Cohort::Taker));
+    assert_eq!(config.cohort_of(acct(3_001)), None);
+    assert_eq!(
+        config.cohort_of(acct(5_001)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Buy })
+    );
+    assert_eq!(
+        config.cohort_of(acct(5_003)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Buy })
+    );
+    assert_eq!(
+        config.cohort_of(acct(5_004)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Sell })
+    );
+    assert_eq!(
+        config.cohort_of(acct(5_402)),
+        Some(Cohort::HighLeverage { market: MarketId::new(67), side: Side::Sell })
+    );
+    assert_eq!(config.cohort_of(acct(7_200)), Some(Cohort::Thin));
+    assert_eq!(config.cohort_of(acct(7_201)), None);
     assert_eq!(config.cohort_of(FUND), None);
     let accounts = config.client_accounts();
     assert_eq!(accounts.len(), 2_870); // 2,870 keys (14.3)
@@ -141,9 +168,18 @@ fn accounts_follow_the_cohorts_of_14_3() {
     // The smoke flow: one long and one short high-leverage account per market.
     let smoke = MarketFlowConfig::smoke();
     assert_eq!(smoke.client_accounts().len(), 24 + 40 + 12 + 10);
-    assert_eq!(smoke.cohort_of(5_001), Some(Cohort::HighLeverage { market: 1, side: Side::Buy }));
-    assert_eq!(smoke.cohort_of(5_002), Some(Cohort::HighLeverage { market: 1, side: Side::Sell }));
-    assert_eq!(smoke.cohort_of(5_012), Some(Cohort::HighLeverage { market: 6, side: Side::Sell }));
+    assert_eq!(
+        smoke.cohort_of(acct(5_001)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Buy })
+    );
+    assert_eq!(
+        smoke.cohort_of(acct(5_002)),
+        Some(Cohort::HighLeverage { market: MarketId::new(1), side: Side::Sell })
+    );
+    assert_eq!(
+        smoke.cohort_of(acct(5_012)),
+        Some(Cohort::HighLeverage { market: MarketId::new(6), side: Side::Sell })
+    );
 }
 
 #[test]
@@ -157,19 +193,23 @@ fn setup_phases_hold_what_14_4_lists_in_its_order() {
 
     // A: per market its parameters, tier and first mark; the fund; deposits; leverage.
     assert!(plan.setup_a.iter().all(|item| !item.is_client()));
-    assert_eq!(*plan.setup_a[0].command(), Command::SetMarketParams(market_params(1)));
-    assert_eq!(*plan.setup_a[2].command(), Command::SetMark(SetMark { price: 101_000, market: 1 }));
-    let fund = Command::Deposit(Deposit { amount: 1_000 * DOLLAR, account: FUND });
+    assert_eq!(*plan.setup_a[0].command(), Command::SetMarketParams(market_params(MarketId::new(1))));
+    assert_eq!(
+        *plan.setup_a[2].command(),
+        Command::SetMark(SetMark { price: px(101_000), market: MarketId::new(1) })
+    );
+    let fund = Command::Deposit(Deposit { amount: dollars(1_000), account: FUND });
     assert_eq!(*plan.setup_a[201].command(), fund);
     assert_eq!(
         *plan.setup_a[202].command(),
-        Command::Deposit(Deposit { amount: 1_000_000 * DOLLAR, account: 1 })
+        Command::Deposit(Deposit { amount: dollars(1_000_000), account: acct(1) })
     );
-    let last_deposit = Command::Deposit(Deposit { amount: 100_000 * DOLLAR, account: 7_200 });
+    let last_deposit = Command::Deposit(Deposit { amount: dollars(100_000), account: acct(7_200) });
     assert_eq!(*plan.setup_a[202 + 2_869].command(), last_deposit);
-    let maker = Command::SetLeverage(SetLeverage { account: 9, market: 3, leverage: 5 });
+    let maker = Command::SetLeverage(SetLeverage { account: acct(9), market: MarketId::new(3), leverage: 5 });
     assert_eq!(*plan.setup_a[3_072 + 8].command(), maker);
-    let high = Command::SetLeverage(SetLeverage { account: 5_402, market: 67, leverage: 20 }); // class 1
+    let high =
+        Command::SetLeverage(SetLeverage { account: acct(5_402), market: MarketId::new(67), leverage: 20 }); // class 1
     assert_eq!(*plan.setup_a.last().expect("items").command(), high);
 
     // B1: the quotes (post-only, on their own side of F0), then the thin layer (GTC).
@@ -183,7 +223,7 @@ fn setup_phases_hold_what_14_4_lists_in_its_order() {
     // Market 3's maker 0 quotes 2, 4 and 6 ticks from 103,000.
     let bids: Vec<Price> =
         plan.setup_b1[48..51].iter().map(|item| place(item).expect("a place").price).collect();
-    assert_eq!(bids, [102_998, 102_996, 102_994]);
+    assert_eq!(bids, [px(102_998), px(102_996), px(102_994)]);
     // B2: three IOCs per high-leverage account, in id order, at F0 ± 10.
     for (i, item) in plan.setup_b2.iter().enumerate() {
         let Item::Client(client) = item else { panic!("B2 is client items") };
@@ -194,7 +234,7 @@ fn setup_phases_hold_what_14_4_lists_in_its_order() {
             (account, market, side, TimeInForce::Ioc)
         );
         let fair = start_fair_value(market);
-        assert_eq!(place.price, if side == Side::Buy { fair + 10 } else { fair - 10 });
+        assert_eq!(place.price, if side == Side::Buy { fair + px(10) } else { fair - px(10) });
     }
 }
 
@@ -231,27 +271,35 @@ fn the_first_items_and_the_counts_after_1m_items_are_pinned() {
         Item::Client(ClientItem {
             account,
             nonce,
-            command: Command::CancelOrder(CancelOrder { order_id: order_id(account, sequence), market }),
+            command: Command::CancelOrder(CancelOrder {
+                order_id: order_id(account, OrderSeq::new(sequence)),
+                market,
+            }),
         })
     };
-    assert_eq!(first[0], cancel(1, 7, 1, 1));
+    assert_eq!(first[0], cancel(acct(1), 7, 1, MarketId::new(1)));
     let replacement = PlaceOrder {
-        order_id: order_id(1, 7),
-        price: 100_999,
-        qty: 508_366,
-        market: 1,
+        order_id: order_id(acct(1), OrderSeq::new(7)),
+        price: px(100_999),
+        qty: lots(508_366),
+        market: MarketId::new(1),
         side: Side::Buy,
         tif: TimeInForce::Gtc,
         post_only: true,
     };
     assert_eq!(
         first[1],
-        Item::Client(ClientItem { account: 1, nonce: 8, command: Command::PlaceOrder(replacement) })
+        Item::Client(ClientItem { account: acct(1), nonce: 8, command: Command::PlaceOrder(replacement) })
     );
-    let modify = ModifyOrder { order_id: order_id(1, 4), new_price: 101_003, new_size: 448_096, market: 1 };
+    let modify = ModifyOrder {
+        order_id: order_id(acct(1), OrderSeq::new(4)),
+        new_price: px(101_003),
+        new_size: lots(448_096),
+        market: MarketId::new(1),
+    };
     assert_eq!(
         first[2],
-        Item::Client(ClientItem { account: 1, nonce: 9, command: Command::ModifyOrder(modify) })
+        Item::Client(ClientItem { account: acct(1), nonce: 9, command: Command::ModifyOrder(modify) })
     );
 
     let mut mix = Mix::default();
@@ -264,11 +312,15 @@ fn the_first_items_and_the_counts_after_1m_items_are_pinned() {
     let pinned =
         Mix { gtc: 323_429, ioc: 40_186, cancels: 323_429, modifies: 306_311, marks: 6_636, withdrawals: 9 };
     assert_eq!(mix, pinned);
-    let modify =
-        ModifyOrder { order_id: order_id(34, 1_212), new_price: 109_039, new_size: 326_572, market: 9 };
+    let modify = ModifyOrder {
+        order_id: order_id(acct(34), OrderSeq::new(1_212)),
+        new_price: px(109_039),
+        new_size: lots(326_572),
+        market: MarketId::new(9),
+    };
     assert_eq!(
         last,
-        Item::Client(ClientItem { account: 34, nonce: 3_584, command: Command::ModifyOrder(modify) })
+        Item::Client(ClientItem { account: acct(34), nonce: 3_584, command: Command::ModifyOrder(modify) })
     );
     assert_eq!((flow.flow_ns(), flow.jumps().len()), (9_947_014_925, 3));
 }
@@ -336,7 +388,7 @@ fn check_plan_rules(plan: &FlowPlan) {
                 assert_eq!(account_of(place.order_id), account, "{client:?}");
                 let sequence = last_sequence.entry(account).or_default();
                 assert_eq!(
-                    sequence_of(place.order_id),
+                    sequence_of(place.order_id).get(),
                     *sequence + 1,
                     "order sequences 1, 2, 3, …: {client:?}"
                 );
@@ -344,7 +396,7 @@ fn check_plan_rules(plan: &FlowPlan) {
                 let params = market_params(place.market);
                 assert!((params.min_price..=params.max_price).contains(&place.price), "{place:?}");
                 assert!(inside_band(&marks, place.market, place.price), "{place:?} outside the band");
-                assert!((1..=config.maker_max_size).contains(&place.qty), "{place:?}");
+                assert!((lots(1)..=config.maker_max_size).contains(&place.qty), "{place:?}");
                 placed.insert(place.order_id, place.market);
             }
             Command::CancelOrder(cancel) => {
@@ -389,9 +441,10 @@ fn every_jump_is_recorded_at_its_mark() {
             *plan.timed[jump.item].command(),
             Command::SetMark(SetMark { price: jump.to, market: jump.market })
         );
-        let size = (jump.to - jump.from).abs();
+        // In ticks: 2% to 6% of the fair value before the jump.
+        let (size, from) = ((jump.to - jump.from).ticks().abs(), jump.from.ticks());
         assert!(
-            size * 1_000_000 >= jump.from * 20_000 - 1_000_000 && size * 1_000_000 <= jump.from * 60_000,
+            size * 1_000_000 >= from * 20_000 - 1_000_000 && size * 1_000_000 <= from * 60_000,
             "{jump:?}"
         );
         // Every quote of the market is pulled, then placed again.
@@ -429,7 +482,7 @@ fn every_setup_phase_is_accepted_by_the_engine_and_the_timed_flow_keeps_rejects_
     // Every high-leverage account holds its position.
     let snapshot = engine.snapshot();
     let positions =
-        snapshot.markets.iter().flat_map(|market| &market.slots).filter(|slot| slot.pos != 0).count();
+        snapshot.markets.iter().flat_map(|market| &market.slots).filter(|slot| slot.pos != Qty::ZERO).count();
     assert!(positions >= 402, "{positions} open positions");
     let applied = apply(&mut engine, &plan.timed);
     let clients = plan.timed.iter().filter(|item| item.is_client()).count() as u64;
@@ -475,7 +528,7 @@ fn check_refuses_a_config_the_generator_cannot_run() {
         MarketFlowConfig { takers: 4_001, ..m3 },
         MarketFlowConfig { high_leverage_per_market: 30, ..m3 }, // 2,010 accounts
         MarketFlowConfig { jump_one_in: 0, ..m3 },
-        MarketFlowConfig { maker_min_size: 2_000_000, ..m3 },
+        MarketFlowConfig { maker_min_size: lots(2_000_000), ..m3 },
         MarketFlowConfig { step_ns: 0, ..m3 },
     ] {
         assert!(bad.check().is_err(), "{bad:?}");
@@ -489,8 +542,8 @@ fn the_digest_names_the_config() {
     assert_eq!(m3.digest(), MarketFlowConfig::m3().digest());
     let changed = [
         MarketFlowConfig { seed: 2, ..m3 },
-        MarketFlowConfig { fund_deposit: m3.fund_deposit + 1, ..m3 },
-        MarketFlowConfig { thin_max_qty: m3.thin_max_qty + 1, ..m3 },
+        MarketFlowConfig { fund_deposit: m3.fund_deposit + Micros::new(1), ..m3 },
+        MarketFlowConfig { thin_max_qty: m3.thin_max_qty + lots(1), ..m3 },
         MarketFlowConfig::smoke(),
     ];
     for other in changed {

@@ -10,7 +10,7 @@ use super::*;
 use crate::market_flow::{ClientItem, MarketFlowConfig, generate};
 use crate::presign::{presign, preverified};
 use engine::command::{CancelOrder, Command, SetMark};
-use engine::types::{AccountId, order_id};
+use engine::types::{AccountId, MarketId, OrderSeq, Price, order_id};
 use gateway::wire::decode;
 use pipeline::codec::decode_command;
 use pipeline::gate::Phase;
@@ -19,15 +19,19 @@ use pipeline::ring::{Consumer, channel};
 
 const IDLE: IdleStrategy = IdleStrategy::SpinThenYield { spins: 16 };
 
-/// Account `account`'s cancel of its order `n`, with nonce `n`.
-fn client(account: AccountId, n: u32) -> Item {
-    let command = Command::CancelOrder(CancelOrder { order_id: order_id(account, n), market: 1 });
+/// Account number `account`'s cancel of its order `n`, with nonce `n`.
+fn client(account: u32, n: u32) -> Item {
+    let account = AccountId::new(account);
+    let command = Command::CancelOrder(CancelOrder {
+        order_id: order_id(account, OrderSeq::new(n)),
+        market: MarketId::new(1),
+    });
     Item::Client(ClientItem { account, nonce: u64::from(n), command })
 }
 
-/// An operator mark of `price` on market 1.
+/// An operator mark of `price` ticks on market 1.
 fn mark(price: i64) -> Item {
-    Item::Operator(Command::SetMark(SetMark { price, market: 1 }))
+    Item::Operator(Command::SetMark(SetMark { price: Price::new(price), market: MarketId::new(1) }))
 }
 
 /// A plan with these phases, for the smoke flow's accounts and seed.
@@ -164,7 +168,10 @@ fn a_full_operator_ring_holds_back_no_client_item_and_its_items_follow_in_order(
     let mut t_sched = Vec::new();
     for item in clients {
         let record = ClientRecord::from_words(&rig.read_client(0));
-        assert_eq!(record.meta, Meta { source: Source::PreVerifiedClient, lane: 0, account: 1 });
+        assert_eq!(
+            record.meta,
+            Meta { source: Source::PreVerifiedClient, lane: 0, account: AccountId::new(1) }
+        );
         assert_eq!(record.nonce, item.nonce);
         assert_eq!(decode_command(&record.command), Ok(item.command));
         assert_eq!((record.expires_at, record.signature, record.t_gw_in, record.t_gw_out), (0, [0; 8], 0, 0));
@@ -175,7 +182,11 @@ fn a_full_operator_ring_holds_back_no_client_item_and_its_items_follow_in_order(
     // Now the marks, in order, each scheduled with the client item before it.
     for (price, after_client) in [(1, 2), (2, 3), (3, 3), (4, 9), (5, 9)] {
         let record = rig.read_operator();
-        assert_eq!(decode_command(&record.command), Ok(Command::SetMark(SetMark { price, market: 1 })));
+        let price = Price::new(price);
+        assert_eq!(
+            decode_command(&record.command),
+            Ok(Command::SetMark(SetMark { price, market: MarketId::new(1) }))
+        );
         assert_eq!(record.t_sched, t_sched[after_client - 1], "mark {price}");
         assert!(record.t_sent >= record.t_sched);
     }
@@ -256,7 +267,7 @@ fn barriers_hold_each_phase_until_the_last_is_resolved_and_drops_count_as_resolv
     // B1: two items per ring. Until they are released, nothing of the timed flow is sent.
     for g in [0, 0, 1, 1] {
         let record = ClientRecord::from_words(&rig.read_client(g));
-        assert_eq!((usize::from(record.meta.lane), record.meta.account as usize % 2), (g, g));
+        assert_eq!((usize::from(record.meta.lane), record.meta.account.get() as usize % 2), (g, g));
     }
     std::thread::sleep(Duration::from_millis(5));
     assert_eq!(
@@ -279,7 +290,7 @@ fn barriers_hold_each_phase_until_the_last_is_resolved_and_drops_count_as_resolv
         for _ in 0..expected {
             let record = ClientRecord::from_words(&rig.read_client(g));
             assert_eq!(usize::from(record.meta.lane), g);
-            assert_eq!(record.meta.account as usize % 2, g);
+            assert_eq!(record.meta.account.get() as usize % 2, g);
         }
         assert!(rig.clients[g].is_finished());
     }
@@ -343,7 +354,7 @@ fn signed_messages_go_to_their_gateway_as_ingress_slots() {
         let slot = IngressSlot::from_words(&words);
         assert_eq!(slot.message, arena.message_bytes(account as usize - 1));
         let decoded = decode(&slot.message).expect("decodes");
-        assert_eq!((decoded.deployment, decoded.account), (5, account));
+        assert_eq!((decoded.deployment, decoded.account), (5, AccountId::new(account)));
         assert!(slot.t_sent >= slot.t_sched);
     }
 }

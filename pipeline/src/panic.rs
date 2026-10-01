@@ -105,6 +105,7 @@ fn describe(info: &PanicHookInfo<'_>) -> String {
 mod tests {
     use super::*;
     use engine::command::SetMark;
+    use engine::types::{MarketId, Price};
     use std::os::unix::process::ExitStatusExt;
     use std::process::Command as Process;
 
@@ -123,7 +124,10 @@ mod tests {
         install_abort_on_panic(); // a second call must not stack a second hook
         let worker = std::thread::Builder::new().name("core".into()).spawn(|| {
             set_current_seq(4_242);
-            set_current_command(Some(Command::SetMark(SetMark { price: 103_001, market: 3 })));
+            set_current_command(Some(Command::SetMark(SetMark {
+                price: Price::new(103_001),
+                market: MarketId::new(3),
+            })));
             panic!("the engine found a crossed book");
         });
         let _ = worker.expect("spawned").join();

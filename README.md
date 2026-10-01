@@ -15,6 +15,7 @@ limit: 400k/s with `k256`, 800k/s with `libsecp256k1`. The matching and risk cor
 
 | Doc | What's in it |
 |---|---|
+| [`docs/COMMANDS.md`](docs/COMMANDS.md) | **Start here:** every command, what it does and how to read its output |
 | [`docs/PIPELINE.md`](docs/PIPELINE.md) | The pipeline: threads, rings, journal, gating, how it is measured |
 | [`docs/RISK.md`](docs/RISK.md) | Margin, liquidation and insurance-fund rules |
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Measured numbers, with machine and commit |
@@ -22,6 +23,8 @@ limit: 400k/s with `k256`, 800k/s with `libsecp256k1`. The matching and risk cor
 | [`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md) | Dependency review log |
 
 ## Running it
+
+The full guide, in plain language, is [`docs/COMMANDS.md`](docs/COMMANDS.md). The short version:
 
 Everything builds and runs inside Docker; nothing is compiled on the host. You need
 Docker with Compose v2 and about 2 GB of disk.

@@ -19,10 +19,7 @@
 use crate::book::OrderBook;
 use crate::event::{CancelReason, Cancelled, Event, EventSink, Fill, InsuranceShortfall};
 use crate::mode::Mode;
-use crate::money::{
-    fee, fund_unrealized_pnl, initial_margin, is_liquidatable, liquidation_key, narrow, release_amount,
-    uncovered_bad_debt, worst_case_size,
-};
+use crate::money::{fee, fund_unrealized_pnl, initial_margin, narrow, uncovered_bad_debt, worst_case_size};
 use crate::state::{Market, Slot};
 use crate::types::{AccountId, MarketId, Micros, Price, Qty, Side, account_of};
 
@@ -69,7 +66,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
             return;
         }
         slot.key_dirty = false;
-        let key = liquidation_key(slot.pos, slot.cost, slot.locked, max_leverage);
+        let key = slot.money().liquidation_key(max_leverage);
         debug_assert_key_is_exact(slot, key, market.mark, max_leverage);
         if key != slot.indexed_key {
             market.index.refile(account, slot.indexed_key, key);
@@ -81,7 +78,8 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     /// Mode. At most `max_qty` at a command boundary (I6), so it fits in `Qty`.
     pub(super) fn worst_case_size_of(market: &Market<B>, account: AccountId, slot: &Slot) -> Qty {
         let (open_buys, open_sells) = Self::open_totals(market, account, slot);
-        narrow(worst_case_size(slot.pos.into(), open_buys.into(), open_sells.into()), "worst-case size")
+        let size = worst_case_size(slot.pos.into(), open_buys.into(), open_sells.into());
+        Qty::new(narrow(size, "worst-case size"))
     }
 
     // -----------------------------------------------------------------------------------
@@ -91,7 +89,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     /// (one, except the band sweep's two `cancel_beyond`s).
     pub(super) fn call_book(&mut self, market_id: MarketId, call: impl FnOnce(&mut B, &mut Vec<Event>)) {
         self.scratch.clear();
-        let market = self.markets[usize::from(market_id)].as_mut().expect("the command's market exists");
+        let market = self.markets[market_id.index()].as_mut().expect("the command's market exists");
         call(&mut market.book, &mut self.scratch);
     }
 
@@ -195,7 +193,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         account: AccountId,
         amount: Micros,
     ) -> Option<TopUp> {
-        if amount == 0 {
+        if amount == Micros::ZERO {
             return None;
         }
         let state = self.account_mut(account);
@@ -233,8 +231,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     pub(super) fn is_below_maintenance(&self, market_id: MarketId, account: AccountId) -> bool {
         let market = self.market(market_id);
         let mark = market.mark.expect("the pass runs only in a market with a mark");
-        let slot = market.slot(account);
-        is_liquidatable(slot.pos, slot.cost, slot.locked, mark, market.params.max_leverage)
+        market.slot(account).money().is_liquidatable(mark, market.params.max_leverage)
     }
 
     /// The release rule (RISK.md 8.2): returns `max(0, min(locked, E) − IM(W))` to the free
@@ -246,8 +243,8 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         let slot = market.slot(account);
         let size = Self::worst_case_size_of(market, account, slot);
         let requirement = initial_margin(size, mark, slot.leverage, market.live_tiers());
-        let release = release_amount(slot.locked, slot.equity(mark), requirement);
-        if release == 0 {
+        let release = slot.money().release_amount(mark, requirement);
+        if release == Micros::ZERO {
             return;
         }
 
@@ -281,7 +278,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     /// when it goes back to 0.
     pub(super) fn report_shortfall(&mut self, events: &mut impl EventSink) {
         let uncovered = uncovered_bad_debt(self.fund_balance, self.fund_upnl_total);
-        let uncovered = narrow(uncovered, "uncovered bad debt");
+        let uncovered = Micros::new(narrow(uncovered, "uncovered bad debt"));
         if uncovered != self.last_reported_uncovered {
             self.last_reported_uncovered = uncovered;
             events.emit(Event::InsuranceShortfall(InsuranceShortfall { uncovered }));
@@ -316,14 +313,20 @@ fn debug_assert_key_is_exact(
     mark: Option<Price>,
     max_leverage: u16,
 ) {
-    let liquidatable = |x: Price| is_liquidatable(slot.pos, slot.cost, slot.locked, x, max_leverage);
+    let liquidatable = |x: Price| slot.money().is_liquidatable(x, max_leverage);
     match (key, mark) {
         (Some((Side::Buy, key)), Some(mark)) => {
-            debug_assert!(liquidatable(key) && !liquidatable(key + 1), "long key {key} is not the boundary");
+            debug_assert!(
+                liquidatable(key) && !liquidatable(key + Price::ONE_TICK),
+                "long key {key} is not the boundary"
+            );
             debug_assert!(key < mark, "long key {key} is at or above the mark {mark}");
         }
         (Some((Side::Sell, key)), Some(mark)) => {
-            debug_assert!(liquidatable(key) && !liquidatable(key - 1), "short key {key} is not the boundary");
+            debug_assert!(
+                liquidatable(key) && !liquidatable(key - Price::ONE_TICK),
+                "short key {key} is not the boundary"
+            );
             debug_assert!(key > mark, "short key {key} is at or below the mark {mark}");
         }
         _ => {}

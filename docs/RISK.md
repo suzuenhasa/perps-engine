@@ -83,15 +83,19 @@ created, no sequence number advances, no collateral moves, no counter moves.
 
 | Quantity | Type | Unit |
 |---|---|---|
-| price, mark | `Price = i64` | ticks of the market |
-| quantity, position | `Qty = i64` | lots of the market; positions are signed (long > 0) |
-| money | `Micros = i64` | micro-dollars (1 USDC = 1,000,000) |
+| price, mark | `Price` (an `i64`) | ticks of the market |
+| quantity, position | `Qty` (an `i64`) | lots of the market; positions are signed (long > 0) |
+| money | `Micros` (an `i64`) | micro-dollars (1 USDC = 1,000,000) |
 | fee rates, price band | `i32` / `u32` | parts per million (ppm) of notional |
 | leverage | `u16` | whole multiples (1 = 1x) |
 
-One tick times one lot is exactly one micro, so **notional = price × qty**, with no scale
-and no rounding. Example (D-004): 1 unit of SP500 at 7,502.4 is 75,024 ticks × 100,000
-lots = 7,502,400,000 micros = $7,502.40.
+`Price`, `Qty` and `Micros` are types of their own over `i64` (`engine/src/types.rs`; since
+2026-10-01, D-004), so one unit can't be passed where another is expected. Values of one
+unit add and subtract; scaling by a rate or dividing by a leverage is written on the bare
+numbers. One tick times one lot is exactly one micro, so **notional = price × qty**, with no
+scale and no rounding, and that is the one product between two units (`qty * price` is
+`Micros`). Example (D-004): 1 unit of SP500 at 7,502.4 is 75,024 ticks × 100,000 lots =
+7,502,400,000 micros = $7,502.40.
 
 ### 2.2 Integer helpers
 

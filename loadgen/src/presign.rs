@@ -420,7 +420,7 @@ pub fn signing_threads() -> usize {
 /// The signer of a message given as its words: bytes 12..16, the high half of word 1
 /// (bytes 8..12 are the deployment).
 pub fn message_account(message: &[u64; MESSAGE_WORDS]) -> AccountId {
-    (message[1] >> 32) as AccountId
+    AccountId::new((message[1] >> 32) as u32)
 }
 
 /// A client item without a signature, for pre-verified runs (14.11): 7 words.

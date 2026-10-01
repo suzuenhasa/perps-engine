@@ -26,6 +26,7 @@ use criterion::{BatchSize, Criterion, SamplingMode, Throughput, criterion_group,
 use engine::book::{Book, BookConfig, OrderBook};
 use engine::command::Command;
 use engine::reference::ReferenceBook;
+use engine::types::Price;
 use loadgen::{FlowConfig, SyntheticFlow};
 
 /// Commands in each timed batch.
@@ -38,7 +39,7 @@ const COMMANDS: usize = 10_000;
 const DEEP_WARM_UP: usize = 100_000;
 
 fn book_config(flow: &FlowConfig) -> BookConfig {
-    BookConfig { market: flow.market, min_price: 1, max_price: flow.mid * 2 }
+    BookConfig { market: flow.market, min_price: Price::new(1), max_price: Price::new(flow.mid.ticks() * 2) }
 }
 
 fn run_flow<B: OrderBook>(c: &mut Criterion, name: &str, new_book: impl Fn() -> B) {

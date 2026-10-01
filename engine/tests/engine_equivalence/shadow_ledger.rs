@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use engine::command::Command;
 use engine::engine::{EngineSnapshot, FUND};
 use engine::event::{Event, Fill};
-use engine::types::{AccountId, MarketId, Qty, account_of};
+use engine::types::{AccountId, MarketId, Micros, Qty, account_of};
 
 /// One block of events. See the module docs.
 #[derive(Clone, Copy, Debug)]
@@ -133,7 +133,7 @@ impl ShadowLedger {
     fn apply_event(&mut self, event: &Event) {
         match *event {
             Event::PositionChanged(p) if p.account == FUND => {
-                assert_eq!(p.locked, 0, "the fund's position carries no collateral: {p:?}");
+                assert_eq!(p.locked, Micros::ZERO, "the fund's position carries no collateral: {p:?}");
                 self.fund.insert(p.market, (p.position, p.cost_basis.into()));
             }
             Event::PositionChanged(p) => {
@@ -200,12 +200,12 @@ impl ShadowLedger {
         let mut slots_seen = 0;
         for market in &snapshot.markets {
             let id = market.params.market;
-            let fund = self.fund.get(&id).copied().unwrap_or((0, 0));
+            let fund = self.fund.get(&id).copied().unwrap_or((Qty::ZERO, 0));
             assert_eq!((market.fund_pos, i128::from(market.fund_cost)), fund, "the fund's position in {id}");
             let fees = self.fees.get(&id).copied().unwrap_or(0);
             assert_eq!(i128::from(market.fees_collected), fees, "fees collected in market {id}");
             for slot in &market.slots {
-                let expected = self.slots.get(&(id, slot.account)).copied().unwrap_or((0, 0, 0));
+                let expected = self.slots.get(&(id, slot.account)).copied().unwrap_or((Qty::ZERO, 0, 0));
                 slots_seen += usize::from(self.slots.contains_key(&(id, slot.account)));
                 let actual = (slot.pos, i128::from(slot.cost), i128::from(slot.locked));
                 assert_eq!(actual, expected, "slot of account {} in market {id}", slot.account);

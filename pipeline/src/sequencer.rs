@@ -316,7 +316,7 @@ mod tests {
     use crate::codec::encode_command;
     use crate::ring::channel;
     use engine::command::{CancelOrder, Command, SetMark};
-    use engine::types::order_id;
+    use engine::types::{AccountId, MarketId, OrderSeq, Price, order_id};
 
     /// A sequencer over `lanes` lanes, with its input producers and output consumers.
     struct Rig {
@@ -350,12 +350,13 @@ mod tests {
 
     /// A pre-verified cancel of account `account`'s order `n`, on lane `lane`.
     fn client(lane: u16, account: u32, n: u32) -> ClientRecord {
+        let account = AccountId::new(account);
         ClientRecord {
             meta: Meta { source: Source::PreVerifiedClient, lane, account },
             nonce: u64::from(n),
             command: encode_command(&Command::CancelOrder(CancelOrder {
-                order_id: order_id(account, n),
-                market: 1,
+                order_id: order_id(account, OrderSeq::new(n)),
+                market: MarketId::new(1),
             })),
             expires_at: 0,
             signature: [0; SIGNATURE_WORDS],
@@ -366,8 +367,10 @@ mod tests {
         }
     }
 
+    /// A mark of `price` ticks.
     fn operator(price: i64) -> OperatorRecord {
-        let command = encode_command(&Command::SetMark(SetMark { price, market: 1 }));
+        let command =
+            encode_command(&Command::SetMark(SetMark { price: Price::new(price), market: MarketId::new(1) }));
         OperatorRecord { command, t_sched: 7, t_sent: 8 }
     }
 
@@ -466,7 +469,7 @@ mod tests {
         // One lane's records keep their order.
         let lane_0: Vec<u64> = out
             .iter()
-            .filter(|(j, _)| j.meta.lane == 0 && j.meta.account == 10)
+            .filter(|(j, _)| j.meta.lane == 0 && j.meta.account == AccountId::new(10))
             .map(|(j, _)| j.nonce)
             .collect();
         assert_eq!(lane_0, (1..=40).collect::<Vec<_>>());
@@ -519,7 +522,7 @@ mod tests {
         );
         let signature = std::array::from_fn(|i| 0xA0 + i as u64);
         let signed = ClientRecord {
-            meta: Meta { source: Source::SignedClient, lane: 0, account: 10 },
+            meta: Meta { source: Source::SignedClient, lane: 0, account: AccountId::new(10) },
             expires_at: 12_345,
             signature,
             ..client(0, 10, 7)
@@ -558,7 +561,7 @@ mod tests {
     fn a_lane_record_of_the_wrong_kind_panics() {
         let mut rig = rig(1, 64, Stamps::On, 1);
         let signed = ClientRecord {
-            meta: Meta { source: Source::SignedClient, lane: 0, account: 10 },
+            meta: Meta { source: Source::SignedClient, lane: 0, account: AccountId::new(10) },
             ..client(0, 10, 1)
         };
         rig.send(0, &signed);

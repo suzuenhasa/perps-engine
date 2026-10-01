@@ -7,7 +7,7 @@
 
 use engine::book::RestingOrder;
 use engine::engine::{EngineSnapshot, MarketSnapshot, SlotSnapshot};
-use engine::types::{AccountId, MarketId, Micros, OrderId};
+use engine::types::{AccountId, MarketId, Micros, OrderId, Qty};
 
 /// The market, if `SetMarketParams` has created it.
 pub fn market_of(state: &EngineSnapshot, market: MarketId) -> Option<&MarketSnapshot> {
@@ -21,11 +21,19 @@ pub fn slot_of(market: &MarketSnapshot, account: AccountId) -> SlotSnapshot {
 
 /// A slot the engine hasn't created: flat, no collateral, no orders, leverage 1.
 pub fn empty_slot(account: AccountId) -> SlotSnapshot {
-    SlotSnapshot { account, pos: 0, cost: 0, locked: 0, leverage: 1, open_buys: 0, open_sells: 0 }
+    SlotSnapshot {
+        account,
+        pos: Qty::ZERO,
+        cost: Micros::ZERO,
+        locked: Micros::ZERO,
+        leverage: 1,
+        open_buys: Qty::ZERO,
+        open_sells: Qty::ZERO,
+    }
 }
 
 pub fn free_of(state: &EngineSnapshot, account: AccountId) -> Micros {
-    state.accounts.iter().find(|a| a.account == account).map_or(0, |a| a.free)
+    state.accounts.iter().find(|a| a.account == account).map_or(Micros::ZERO, |a| a.free)
 }
 
 /// The lowest order sequence number the account may use next.

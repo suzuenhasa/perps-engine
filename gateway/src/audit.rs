@@ -453,8 +453,9 @@ fn kind_fits(record: &JournalRecord, command: &Command, mode: InjectionMode) -> 
             if account_of(order_id) != record.meta.account =>
         {
             Err(format!(
-                "account {} doesn't own order {order_id:#x}, which is account {}'s",
+                "account {} doesn't own order {:#x}, which is account {}'s",
                 record.meta.account,
+                order_id.get(),
                 account_of(order_id)
             ))
         }
@@ -467,11 +468,11 @@ fn kind_fits(record: &JournalRecord, command: &Command, mode: InjectionMode) -> 
 mod tests {
     use super::*;
     use crate::test_support::{
-        VERIFIER, cancel, message_eip712, modify, place, registry, signing_key, with_market,
+        VERIFIER, acct, cancel, message_eip712, modify, place, registry, signing_key, with_market,
     };
     use engine::command::{Deposit, SetMark};
     use engine::engine::EngineOptions;
-    use engine::types::MarketId;
+    use engine::types::{MarketId, Micros, Price};
     use k256::ecdsa::Signature;
     use k256::ecdsa::signature::Signer;
     use pipeline::clock::RunClock;
@@ -511,7 +512,7 @@ mod tests {
         JournalRecord {
             seq,
             ts,
-            meta: Meta { source: Source::SignedClient, lane: (account % 2) as u16, account },
+            meta: Meta { source: Source::SignedClient, lane: (account.get() % 2) as u16, account },
             nonce,
             command: encode_command(command),
             expires_at,
@@ -569,26 +570,29 @@ mod tests {
     }
 
     fn deposit(account: AccountId) -> Entry {
-        Entry::Operator(Command::Deposit(Deposit { amount: 1_000_000, account }))
+        Entry::Operator(Command::Deposit(Deposit { amount: Micros::new(1_000_000), account }))
     }
 
     #[test]
     fn a_journal_of_genuine_messages_passes_across_segments_and_a_key_change() {
         // Life 1 with keys from seed 1; after a "restart", account 9's key is replaced
         // (seed 2), and its segment names the new registry.
-        let first = registry(1, DEPLOYMENT, [3, 9]);
-        let keys_2 = [(3, *signing_key(1, 3).verifying_key()), (9, *signing_key(2, 9).verifying_key())];
+        let first = registry(1, DEPLOYMENT, [3, 9].map(acct));
+        let keys_2 = [
+            (acct(3), *signing_key(1, acct(3)).verifying_key()),
+            (acct(9), *signing_key(2, acct(9)).verifying_key()),
+        ];
         let second = KeyRegistry::from_keys(DEPLOYMENT, &keys_2, VERIFIER).expect("valid");
         assert_ne!(first.digest(), second.digest());
-        let mut life_1 = vec![deposit(3), deposit(9)];
+        let mut life_1 = vec![deposit(acct(3)), deposit(acct(9))];
         // Enough records to cross 4 KiB segments several times (152 bytes each).
         for n in 1..=60 {
-            life_1.push(Entry::Signed(9, n, place(9, n as u32), 1));
-            life_1.push(Entry::Signed(3, n, cancel(3, n as u32), 1));
+            life_1.push(Entry::Signed(acct(9), n, place(acct(9), n as u32), 1));
+            life_1.push(Entry::Signed(acct(3), n, cancel(acct(3), n as u32), 1));
         }
         let life_2 = vec![
-            Entry::Signed(9, 61, place(9, 61), 2),
-            Entry::Operator(Command::SetMark(SetMark { price: 5, market: 3 })),
+            Entry::Signed(acct(9), 61, place(acct(9), 61), 2),
+            Entry::Operator(Command::SetMark(SetMark { price: Price::new(5), market: MarketId::new(3) })),
         ];
         let mut disk = journal(&[(first.digest(), life_1), (second.digest(), life_2)]);
         let report = verify_files(&mut disk, &[second.clone(), first.clone()], 3);
@@ -603,11 +607,11 @@ mod tests {
 
     #[test]
     fn a_signature_by_another_key_fails_and_names_the_record() {
-        let keys = registry(1, DEPLOYMENT, [3, 9]);
+        let keys = registry(1, DEPLOYMENT, [3, 9].map(acct));
         let entries = vec![
-            Entry::Signed(9, 1, place(9, 1), 1),
-            Entry::Signed(9, 2, place(9, 2), 7), // signed with another key
-            Entry::Signed(3, 1, place(3, 1), 1),
+            Entry::Signed(acct(9), 1, place(acct(9), 1), 1),
+            Entry::Signed(acct(9), 2, place(acct(9), 2), 7), // signed with another key
+            Entry::Signed(acct(3), 1, place(acct(3), 1), 1),
         ];
         let mut disk = journal(&[(keys.digest(), entries)]);
         let report = verify_files(&mut disk, &[keys], 2);
@@ -618,9 +622,12 @@ mod tests {
 
     #[test]
     fn a_copied_record_fails_the_nonce_order() {
-        let keys = registry(1, DEPLOYMENT, [9]);
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
         // The same genuine message twice (a replay the gateway would have refused).
-        let entries = vec![Entry::Signed(9, 5, place(9, 1), 1), Entry::Signed(9, 5, place(9, 1), 1)];
+        let entries = vec![
+            Entry::Signed(acct(9), 5, place(acct(9), 1), 1),
+            Entry::Signed(acct(9), 5, place(acct(9), 1), 1),
+        ];
         let mut disk = journal(&[(keys.digest(), entries)]);
         let report = verify_files(&mut disk, &[keys], 2);
         assert_eq!(report.failures, 1, "{report}");
@@ -629,8 +636,8 @@ mod tests {
 
     #[test]
     fn an_account_without_a_key_fails() {
-        let keys = registry(1, DEPLOYMENT, [9]);
-        let entries = vec![Entry::Signed(11, 1, place(11, 1), 1)];
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
+        let entries = vec![Entry::Signed(acct(11), 1, place(acct(11), 1), 1)];
         let mut disk = journal(&[(keys.digest(), entries)]);
         let report = verify_files(&mut disk, &[keys], 1);
         assert_eq!(report.failures, 1);
@@ -639,8 +646,8 @@ mod tests {
 
     #[test]
     fn a_registry_for_another_deployment_fails() {
-        let other = registry(1, DEPLOYMENT + 1, [9]);
-        let mut disk = journal(&[(other.digest(), vec![Entry::Signed(9, 1, place(9, 1), 1)])]);
+        let other = registry(1, DEPLOYMENT + 1, [9].map(acct));
+        let mut disk = journal(&[(other.digest(), vec![Entry::Signed(acct(9), 1, place(acct(9), 1), 1)])]);
         let report = verify_files(&mut disk, &[other], 1);
         assert_eq!(report.failures, 1);
         assert!(report.listed[0].what.contains("is for deployment 5, the journal's is 4"), "{report}");
@@ -650,12 +657,12 @@ mod tests {
     fn records_that_break_the_kind_rules_fail_even_if_the_scan_let_them_through() {
         // `scan_journal` refuses these as errors; the audit's own rule is checked here
         // directly.
-        let place_9 = place(9, 1);
-        let not_owner = signed_record(1, 1, 7, 1, &place_9, 1);
+        let place_9 = place(acct(9), 1);
+        let not_owner = signed_record(1, 1, acct(7), 1, &place_9, 1);
         assert!(kind_fits(&not_owner, &place_9, InjectionMode::Signed).unwrap_err().contains("account 9's"));
-        let mark = Command::SetMark(SetMark { price: 1, market: 1 });
+        let mark = Command::SetMark(SetMark { price: Price::new(1), market: MarketId::new(1) });
         let client_mark =
-            JournalRecord { command: encode_command(&mark), ..signed_record(1, 1, 9, 1, &mark, 1) };
+            JournalRecord { command: encode_command(&mark), ..signed_record(1, 1, acct(9), 1, &mark, 1) };
         assert!(
             kind_fits(&client_mark, &mark, InjectionMode::Signed)
                 .unwrap_err()
@@ -663,7 +670,7 @@ mod tests {
         );
         let operator_place = operator_record(1, 1, &place_9);
         assert!(kind_fits(&operator_place, &place_9, InjectionMode::Signed).is_err());
-        let signed = signed_record(1, 1, 9, 1, &place_9, 1);
+        let signed = signed_record(1, 1, acct(9), 1, &place_9, 1);
         assert!(kind_fits(&signed, &place_9, InjectionMode::PreVerified).unwrap_err().contains("kind-1"));
         let pre_verified =
             JournalRecord { meta: Meta { source: Source::PreVerifiedClient, ..signed.meta }, ..signed };
@@ -674,8 +681,9 @@ mod tests {
 
     #[test]
     fn a_corrupt_record_stops_the_audit_with_a_failure() {
-        let keys = registry(1, DEPLOYMENT, [9]);
-        let entries: Vec<_> = (1..=3).map(|n| Entry::Signed(9, n, place(9, n as u32), 1)).collect();
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
+        let entries: Vec<_> =
+            (1..=3).map(|n| Entry::Signed(acct(9), n, place(acct(9), n as u32), 1)).collect();
         let mut disk = journal(&[(keys.digest(), entries)]);
         // The second record's tag becomes a deposit's, and its CRC is fixed up: the scan
         // sees a valid record that breaks 11.3's rules, and stops with an error.
@@ -749,7 +757,7 @@ mod tests {
         JournalRecord {
             seq: 0,
             ts: 0,
-            meta: Meta { source: Source::SignedClient, lane: (account % 2) as u16, account },
+            meta: Meta { source: Source::SignedClient, lane: (account.get() % 2) as u16, account },
             nonce: salt,
             command: encode_command(command),
             expires_at: ts_ms,
@@ -764,15 +772,33 @@ mod tests {
 
     #[test]
     fn an_eip712_journal_of_genuine_messages_passes() {
-        let keys = registry(1, DEPLOYMENT, [3, 9]);
-        let mut entries = vec![deposit(3), deposit(9)];
+        let keys = registry(1, DEPLOYMENT, [3, 9].map(acct));
+        let mut entries = vec![deposit(acct(3)), deposit(acct(9))];
         // Enough records to cross 4 KiB segments several times; salts repeat across
         // accounts and timestamps, which is allowed: the request is all three.
         for n in 1..=40u32 {
             let ts_ms = START_MS - u64::from(n) * 1_000;
-            entries.push(Entry::Record(eip712_record(9, u64::from(n % 4), ts_ms, &place(9, n), 1)));
-            entries.push(Entry::Record(eip712_record(3, u64::from(n % 4), ts_ms, &cancel(3, n), 1)));
-            entries.push(Entry::Record(eip712_record(3, 7, START_MS + u64::from(n), &modify(3, n), 1)));
+            entries.push(Entry::Record(eip712_record(
+                acct(9),
+                u64::from(n % 4),
+                ts_ms,
+                &place(acct(9), n),
+                1,
+            )));
+            entries.push(Entry::Record(eip712_record(
+                acct(3),
+                u64::from(n % 4),
+                ts_ms,
+                &cancel(acct(3), n),
+                1,
+            )));
+            entries.push(Entry::Record(eip712_record(
+                acct(3),
+                7,
+                START_MS + u64::from(n),
+                &modify(acct(3), n),
+                1,
+            )));
         }
         let mut disk = eip712_journal(&keys, entries);
         let report = verify_files(&mut disk, std::slice::from_ref(&keys), 3);
@@ -781,7 +807,7 @@ mod tests {
         // The same records in a journal whose header says perp: every signature fails, since
         // the audit then checks the 72 bytes of the perp scheme.
         let identity = JournalIdentity::new(DEPLOYMENT, InjectionMode::Signed, EngineOptions::default());
-        let entries = vec![Entry::Record(eip712_record(9, 1, START_MS, &place(9, 1), 1))];
+        let entries = vec![Entry::Record(eip712_record(acct(9), 1, START_MS, &place(acct(9), 1), 1))];
         let mut perp = journal_of(identity, START, &[(keys.digest(), entries)]);
         let report = verify_files(&mut perp, &[keys], 1);
         assert_eq!(report.failures, 1, "{report}");
@@ -790,8 +816,8 @@ mod tests {
 
     #[test]
     fn an_eip712_record_with_a_field_changed_after_signing_fails() {
-        let keys = registry(1, DEPLOYMENT, [9]);
-        let genuine = eip712_record(9, 5, START_MS, &place(9, 1), 1);
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
+        let genuine = eip712_record(acct(9), 5, START_MS, &place(acct(9), 1), 1);
         let mut disk = eip712_journal(&keys, vec![Entry::Record(genuine)]);
         assert!(
             verify_files(&mut disk, std::slice::from_ref(&keys), 1).passed(),
@@ -804,10 +830,10 @@ mod tests {
             ("the timestamp", JournalRecord { expires_at: START_MS - 1, ..genuine }, "BadSignature"),
             (
                 "the command",
-                JournalRecord { command: encode_command(&place(9, 2)), ..genuine },
+                JournalRecord { command: encode_command(&place(acct(9), 2)), ..genuine },
                 "BadSignature",
             ),
-            ("another key", eip712_record(9, 5, START_MS, &place(9, 1), 7), "BadSignature"),
+            ("another key", eip712_record(acct(9), 5, START_MS, &place(acct(9), 1), 7), "BadSignature"),
             ("no signature", JournalRecord { signature: [0; SIGNATURE_WORDS], ..genuine }, "BadSignature"),
             ("the high-S twin", JournalRecord { signature: high_s_twin, ..genuine }, "HighS"),
         ];
@@ -824,10 +850,10 @@ mod tests {
         // The limitation of module docs, "What it proves": the scheme signs a cancel's and a
         // modify's order id, not their market, so the audit passes a journal whose market
         // was changed there. (A place's market is signed, and its edit fails above.)
-        let keys = registry(1, DEPLOYMENT, [9]);
-        for (salt, command) in [(5, cancel(9, 1)), (6, modify(9, 1))] {
-            let genuine = eip712_record(9, salt, START_MS, &command, 1);
-            let changed = with_market(&command, 2);
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
+        for (salt, command) in [(5, cancel(acct(9), 1)), (6, modify(acct(9), 1))] {
+            let genuine = eip712_record(acct(9), salt, START_MS, &command, 1);
+            let changed = with_market(&command, MarketId::new(2));
             assert_ne!(changed, command);
             let edited = JournalRecord { command: encode_command(&changed), ..genuine };
             let mut disk = eip712_journal(&keys, vec![Entry::Record(edited)]);
@@ -843,15 +869,17 @@ mod tests {
         // gateway's key does, so copies the gateway accepted as other requests (and the
         // engine rejected) pass here, next to the genuine record, in any order. An exact
         // repeat, of the genuine record or of a copy, still fails.
-        let keys = registry(1, DEPLOYMENT, [9]);
-        for (salt, command) in [(5, cancel(9, 1)), (6, modify(9, 1))] {
-            let genuine = eip712_record(9, salt, START_MS, &command, 1);
-            let on =
-                |market| JournalRecord { command: encode_command(&with_market(&command, market)), ..genuine };
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
+        for (salt, command) in [(5, cancel(acct(9), 1)), (6, modify(acct(9), 1))] {
+            let genuine = eip712_record(acct(9), salt, START_MS, &command, 1);
+            let on = |market| JournalRecord {
+                command: encode_command(&with_market(&command, MarketId::new(market))),
+                ..genuine
+            };
             let journal_with = |records: [JournalRecord; 3]| {
                 eip712_journal(&keys, records.into_iter().map(Entry::Record).collect())
             };
-            let mut disk = journal_with([on(2), genuine, on(MarketId::MAX)]);
+            let mut disk = journal_with([on(2), genuine, on(u16::MAX)]);
             let report = verify_files(&mut disk, std::slice::from_ref(&keys), 1);
             assert!(report.passed(), "{report}");
             assert_eq!(report.signed, 3, "and each signature verified");
@@ -868,13 +896,13 @@ mod tests {
 
     #[test]
     fn a_repeated_eip712_request_fails() {
-        let keys = registry(1, DEPLOYMENT, [3, 9]);
-        let request = eip712_record(9, 5, START_MS, &place(9, 1), 1);
+        let keys = registry(1, DEPLOYMENT, [3, 9].map(acct));
+        let request = eip712_record(acct(9), 5, START_MS, &place(acct(9), 1), 1);
         // The same request twice (a replay the gateway would have refused), and the same
         // salt and timestamp for another account, which is another request.
         let entries = vec![
             Entry::Record(request),
-            Entry::Record(eip712_record(3, 5, START_MS, &place(3, 1), 1)),
+            Entry::Record(eip712_record(acct(3), 5, START_MS, &place(acct(3), 1), 1)),
             Entry::Record(request),
         ];
         let mut disk = eip712_journal(&keys, entries);
@@ -889,11 +917,12 @@ mod tests {
 
     #[test]
     fn an_eip712_timestamp_outside_the_window_of_its_record_fails() {
-        let keys = registry(1, DEPLOYMENT, [9]);
+        let keys = registry(1, DEPLOYMENT, [9].map(acct));
         let oldest = START_MS - MAX_AGE_MS - SEQUENCING_SLACK_MS;
         let latest = START_MS + MAX_AHEAD_MS;
-        let at =
-            |salt: u64, ts_ms: u64| Entry::Record(eip712_record(9, salt, ts_ms, &place(9, salt as u32), 1));
+        let at = |salt: u64, ts_ms: u64| {
+            Entry::Record(eip712_record(acct(9), salt, ts_ms, &place(acct(9), salt as u32), 1))
+        };
         // The edges pass.
         let mut disk = eip712_journal(&keys, vec![at(1, oldest), at(2, latest)]);
         let report = verify_files(&mut disk, std::slice::from_ref(&keys), 1);

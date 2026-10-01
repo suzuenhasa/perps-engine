@@ -350,20 +350,22 @@ mod tests {
     //! test the parts that don't.
     use super::*;
     use engine::event::Ack;
+    use engine::types::OrderId;
 
     fn ack(seq: u64, id: u64) -> [u64; 8] {
-        event_slot(seq, &Event::Ack(Ack { order_id: id }))
+        event_slot(seq, &Event::Ack(Ack { order_id: OrderId::new(id) }))
     }
 
     #[test]
     fn the_nonce_table_keeps_the_highest_nonce_per_account() {
         let mut table = NonceTable::new();
-        assert_eq!(table.get(9), 0);
-        table.note(9, 5);
-        table.note(9, 3);
-        table.note(4, 1);
-        assert_eq!((table.get(9), table.get(4), table.len()), (5, 1, 2));
-        assert_eq!(table.iter().collect::<Vec<_>>(), [(4, 1), (9, 5)]);
+        let (four, nine) = (AccountId::new(4), AccountId::new(9));
+        assert_eq!(table.get(nine), 0);
+        table.note(nine, 5);
+        table.note(nine, 3);
+        table.note(four, 1);
+        assert_eq!((table.get(nine), table.get(four), table.len()), (5, 1, 2));
+        assert_eq!(table.iter().collect::<Vec<_>>(), [(four, 1), (nine, 5)]);
     }
 
     #[test]

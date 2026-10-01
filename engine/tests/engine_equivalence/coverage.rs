@@ -13,8 +13,7 @@ use std::collections::BTreeMap;
 use engine::command::{Command, ModifyOrder, PlaceOrder};
 use engine::engine::{EngineSnapshot, FUND};
 use engine::event::{CancelReason, Event, RejectReason};
-use engine::money::liquidation_key;
-use engine::types::{MarketId, Qty, Side, TimeInForce, account_of};
+use engine::types::{MarketId, Micros, Qty, Side, TimeInForce, account_of};
 
 use super::checker::{in_margin_call, margin_request, tier_row};
 use super::shadow_ledger::{BlockKind, split_into_blocks};
@@ -192,10 +191,10 @@ impl Coverage {
                 let market = market_of(before, set.market).expect("an accepted mark is for a market");
                 let mut keys = Vec::new();
                 for liquidation in liquidated {
-                    let side = if liquidation.position > 0 { "long" } else { "short" };
+                    let side = if liquidation.position > Qty::ZERO { "long" } else { "short" };
                     self.count(&format!("SetMark liquidation of a {side}"));
                     let slot = slot_of(market, liquidation.account);
-                    keys.push(liquidation_key(slot.pos, slot.cost, slot.locked, market.params.max_leverage));
+                    keys.push(slot.money().liquidation_key(market.params.max_leverage));
                 }
                 keys.sort_unstable_by_key(|key| key.map(|(side, price)| (side as u8, price)));
                 if keys.windows(2).any(|pair| pair[0] == pair[1]) {
@@ -216,13 +215,14 @@ impl Coverage {
                     if shortfall.uncovered > before.last_reported_uncovered {
                         self.count("shortfall rising");
                     }
-                    if shortfall.uncovered == 0 {
+                    if shortfall.uncovered == Micros::ZERO {
                         self.count("shortfall back to 0");
                     }
                 }
                 Event::InsuranceAbsorb(absorb) => {
-                    let fund = fund_positions.get(&absorb.market).copied().unwrap_or(0);
-                    if fund != 0 && absorb.position != 0 && fund.signum() != absorb.position.signum() {
+                    let fund = fund_positions.get(&absorb.market).copied().unwrap_or(Qty::ZERO);
+                    let opposite = fund.lots().signum() != absorb.position.lots().signum();
+                    if fund != Qty::ZERO && absorb.position != Qty::ZERO && opposite {
                         let kind = if absorb.position.abs() <= fund.abs() { "reduce" } else { "flip" };
                         self.count(&format!("fund netting: {kind}"));
                     }

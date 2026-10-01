@@ -10,12 +10,12 @@
 //!
 //! **Complexity.** Both walk everything and allocate: tests only, never on the hot path.
 
+use std::cmp::Ordering;
+
 use crate::book::{BookSnapshot, OrderBook};
 use crate::command::SetMarketParams;
 use crate::mode::Mode;
-use crate::money::{
-    Tier, fund_unrealized_pnl, is_liquidatable, liquidation_key, uncovered_bad_debt, worst_case_size,
-};
+use crate::money::{SlotMoney, Tier, fund_unrealized_pnl, uncovered_bad_debt, worst_case_size};
 use crate::state::{Market, Slot};
 use crate::types::{AccountId, Micros, Price, Qty, Side, account_of, sequence_of};
 
@@ -76,6 +76,14 @@ pub struct SlotSnapshot {
     pub leverage: u16,
     pub open_buys: Qty,
     pub open_sells: Qty,
+}
+
+impl SlotSnapshot {
+    /// The slot's position, cost basis and collateral, for the money formulas, as
+    /// `Slot::money()` gives them for a live slot.
+    pub fn money(&self) -> SlotMoney {
+        SlotMoney { pos: self.pos, cost: self.cost, locked: self.locked }
+    }
 }
 
 impl<B: OrderBook, M: Mode> Engine<B, M> {
@@ -147,7 +155,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     pub fn assert_invariants(&self) {
         let mut conserved = i128::from(self.fund_balance);
         for (&account, state) in &self.accounts {
-            assert!(state.free >= 0, "I8: account {account} has a negative free balance");
+            assert!(state.free >= Micros::ZERO, "I8: account {account} has a negative free balance");
             conserved += i128::from(state.free);
         }
         let mut fund_upnl_total = 0;
@@ -183,8 +191,8 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
             assert_eq!(market.fund_upnl, fund_upnl, "I9: the fund's PnL in market {id}");
         }
 
-        let open =
-            market.slots.values().filter(|slot| slot.pos != 0).count() + usize::from(market.fund_pos != 0);
+        let open = market.slots.values().filter(|slot| slot.pos != Qty::ZERO).count()
+            + usize::from(market.fund_pos != Qty::ZERO);
         assert_eq!(market.nonzero_positions as usize, open, "market {id}'s count of positions");
         let mut listed = market.accounts.clone();
         listed.sort_unstable();
@@ -212,11 +220,11 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         }
         for order in book.bids.iter().chain(&book.asks) {
             let owner = account_of(order.order_id);
-            let sequence = u64::from(sequence_of(order.order_id));
+            let sequence = u64::from(sequence_of(order.order_id).get());
             assert!(
                 sequence < self.next_seq(owner),
                 "I11: order {:#x} is not below its account's next_seq",
-                order.order_id
+                order.order_id.get()
             );
         }
         for (&account, slot) in &market.slots {
@@ -246,8 +254,8 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         let size = worst_case_size(slot.pos.into(), open_buys.into(), open_sells.into());
         assert!(i128::from(slot.pos.abs()) <= size, "I6: {what}");
         assert!(size <= i128::from(market.max_qty), "I6: {what} is above max_qty");
-        if slot.pos == 0 && open_buys == 0 && open_sells == 0 {
-            assert_eq!(slot.locked, 0, "I7: {what} is flat with no orders but holds collateral");
+        if slot.pos == Qty::ZERO && open_buys == Qty::ZERO && open_sells == Qty::ZERO {
+            assert_eq!(slot.locked, Micros::ZERO, "I7: {what} is flat with no orders but holds collateral");
         }
         assert_cost_basis_signs(slot.pos, slot.cost, &format!("I8: {what}"));
         let most_cost = i128::from(slot.pos.abs()) * i128::from(market.params.max_price);
@@ -258,17 +266,17 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
         let max_leverage = market.params.max_leverage;
         if let Some(mark) = market.mark {
-            let below_mm = is_liquidatable(slot.pos, slot.cost, slot.locked, mark, max_leverage);
+            let below_mm = slot.money().is_liquidatable(mark, max_leverage);
             assert!(!below_mm, "I5: {what} is below maintenance margin");
         }
         if M::LIQUIDATION_INDEX {
-            let key = liquidation_key(slot.pos, slot.cost, slot.locked, max_leverage);
+            let key = slot.money().liquidation_key(max_leverage);
             assert_eq!(slot.indexed_key, key, "I10: {what} is indexed at a stale key");
             // The key is the boundary: liquidatable there, and not one tick back toward safety.
-            let liquidatable = |x: Price| is_liquidatable(slot.pos, slot.cost, slot.locked, x, max_leverage);
+            let liquidatable = |x: Price| slot.money().is_liquidatable(x, max_leverage);
             let boundary = match key {
-                Some((Side::Buy, key)) => liquidatable(key) && !liquidatable(key + 1),
-                Some((Side::Sell, key)) => liquidatable(key) && !liquidatable(key - 1),
+                Some((Side::Buy, key)) => liquidatable(key) && !liquidatable(key + Price::ONE_TICK),
+                Some((Side::Sell, key)) => liquidatable(key) && !liquidatable(key - Price::ONE_TICK),
                 None => true,
             };
             assert!(boundary, "I10: {what}'s key {key:?} is not its liquidation boundary");
@@ -317,12 +325,12 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         self.accounts.entry(account).or_insert(crate::state::Account::NEW);
         let market = self.market_mut(market_id);
         let slot = market.slot_or_create(account);
-        let was_open = slot.pos != 0;
+        let was_open = slot.pos != Qty::ZERO;
         let value_change =
             (i128::from(locked) - i128::from(cost)) - (i128::from(slot.locked) - i128::from(slot.cost));
         (slot.pos, slot.cost, slot.locked) = (pos, cost, locked);
         slot.key_dirty = true;
-        crate::state::count_position_change(&mut market.nonzero_positions, was_open, pos != 0);
+        crate::state::count_position_change(&mut market.nonzero_positions, was_open, pos != Qty::ZERO);
         Self::rekey(market, account);
         self.net_deposits += value_change;
     }
@@ -331,10 +339,10 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 /// I8's sign rule for a position and its cost basis: flat has no cost basis, a long's is at
 /// least 0 and a short's at most 0.
 fn assert_cost_basis_signs(pos: Qty, cost: Micros, what: &str) {
-    let signs_agree = match pos.signum() {
-        0 => cost == 0,
-        1 => cost >= 0,
-        _ => cost <= 0,
+    let signs_agree = match pos.cmp(&Qty::ZERO) {
+        Ordering::Equal => cost == Micros::ZERO,
+        Ordering::Greater => cost >= Micros::ZERO,
+        Ordering::Less => cost <= Micros::ZERO,
     };
     assert!(signs_agree, "{what}: position {pos} with cost basis {cost}");
 }

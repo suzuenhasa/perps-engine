@@ -14,7 +14,7 @@ use crate::book::{OrderBook, RestingOrder};
 use crate::command::{CancelOrder, ModifyOrder, PlaceOrder};
 use crate::event::{CancelReason, Event, EventSink, RejectReason};
 use crate::mode::Mode;
-use crate::money::{initial_margin, is_strictly_reducing, narrow, top_up_needed, worst_case_size};
+use crate::money::{initial_margin, is_strictly_reducing, narrow, worst_case_size};
 use crate::state::{Market, Slot};
 use crate::types::{AccountId, Micros, Price, Qty, Side, account_of, sequence_of};
 
@@ -54,7 +54,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         if owner == FUND {
             return Err(RejectReason::ReservedAccount);
         }
-        if order.qty < 1 {
+        if order.qty < Qty::new(1) {
             return Err(RejectReason::InvalidQty);
         }
         if !market.price_in_range(order.price) {
@@ -62,7 +62,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         }
         // Every resting order of the account has a lower sequence, so the book's own
         // duplicate check can never fire after this one.
-        if u64::from(sequence_of(order.order_id)) < self.next_seq(owner) {
+        if u64::from(sequence_of(order.order_id).get()) < self.next_seq(owner) {
             return Err(RejectReason::Duplicate);
         }
         if order.post_only && would_cross(&market.book, order.side, order.price) {
@@ -78,7 +78,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         self.market_mut(market_id).slot_or_create(owner);
         // The command's own slot comes first in the post-command pass.
         self.touch(market_id, owner);
-        self.account_mut(owner).next_seq = u64::from(sequence_of(order.order_id)) + 1;
+        self.account_mut(owner).next_seq = u64::from(sequence_of(order.order_id).get()) + 1;
         // Counted in full before matching, an IOC too: its fills take their quantity off
         // again, and so does the book's cancel of whatever an IOC leaves unfilled.
         Self::add_open(self.market_mut(market_id).slot_mut(owner), order.side, order.qty);
@@ -133,7 +133,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     fn check_modify(&self, modify: &ModifyOrder) -> Result<(Side, ModifyKind), RejectReason> {
         let market = self.find_market(modify.market).ok_or(RejectReason::UnknownMarket)?;
         let order: RestingOrder = market.book.order(modify.order_id).ok_or(RejectReason::UnknownOrder)?;
-        if modify.new_size < 1 {
+        if modify.new_size < Qty::new(1) {
             return Err(RejectReason::InvalidQty);
         }
         if !market.price_in_range(modify.new_price) {
@@ -142,7 +142,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
         let remaining = order.qty;
         let new_remaining = modify.new_size - order.filled;
-        if new_remaining <= 0 {
+        if new_remaining <= Qty::ZERO {
             return Ok((order.side, ModifyKind::Removal));
         }
         if modify.new_price == order.price && new_remaining <= remaining {
@@ -242,9 +242,9 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
             return Err(RejectReason::SizeLimit);
         }
         if is_strictly_reducing(slot.pos, side, buys_after, sells_after) {
-            return Ok(0);
+            return Ok(Micros::ZERO);
         }
-        self.check_margin_rule(market, account, &slot, narrow(size_after, "worst-case size"))
+        self.check_margin_rule(market, account, &slot, Qty::new(narrow(size_after, "worst-case size")))
     }
 
     /// The margin rule (RISK.md 5.2), for an order that would take the slot's worst-case
@@ -261,11 +261,11 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     ) -> Result<Micros, RejectReason> {
         let mark = market.mark.expect("the caller checked that the market has a mark");
         let tiers = market.live_tiers();
-        let equity = slot.equity(mark);
-        let need = top_up_needed(initial_margin(size_after, mark, slot.leverage, tiers), equity);
+        let requirement = initial_margin(size_after, mark, slot.leverage, tiers);
+        let need = slot.money().top_up_needed(mark, requirement);
         if need <= self.free_balance(account) {
             Ok(need)
-        } else if equity < initial_margin(slot.pos.abs(), mark, slot.leverage, tiers) {
+        } else if slot.equity(mark) < initial_margin(slot.pos.abs(), mark, slot.leverage, tiers) {
             Err(RejectReason::MarginCall)
         } else {
             Err(RejectReason::InsufficientMargin)

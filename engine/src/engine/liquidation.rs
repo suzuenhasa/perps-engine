@@ -37,9 +37,9 @@ use std::cmp::Reverse;
 use crate::book::OrderBook;
 use crate::event::{CancelReason, Event, EventSink, InsuranceAbsorb, Liquidation};
 use crate::mode::Mode;
-use crate::money::{is_liquidatable, liquidation_key_by_search, narrow};
+use crate::money::narrow;
 use crate::state::Absorbed;
-use crate::types::{AccountId, MarketId, Price, Side};
+use crate::types::{AccountId, MarketId, Micros, Price, Qty, Side};
 
 use super::{Engine, FUND, balance_event, fund_position_event, position_event};
 
@@ -73,7 +73,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         self.apply_book_events(market_id, None, events);
         let market = self.market_mut(market_id);
         let slot = market.slot_mut(account);
-        (slot.open_buys, slot.open_sells) = (0, 0);
+        (slot.open_buys, slot.open_sells) = (Qty::ZERO, Qty::ZERO);
 
         // 2. Say what is being liquidated.
         events.emit(Event::Liquidation(Liquidation { position: slot.pos, account, market: market_id }));
@@ -108,7 +108,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         let realized = market.net_into_fund(absorbed.pos, absorbed.cost);
         let (fund_pos, fund_cost) = (market.fund_pos, market.fund_cost);
         let balance = i128::from(self.fund_balance) + i128::from(absorbed.locked) + i128::from(realized);
-        self.fund_balance = narrow(balance, "the insurance fund's balance");
+        self.fund_balance = Micros::new(narrow(balance, "the insurance fund's balance"));
         self.revalue_fund_position(market_id);
         events.emit(fund_position_event(market_id, fund_pos, fund_cost));
         events.emit(balance_event(FUND, self.fund_balance));
@@ -179,22 +179,15 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         let mut shorts: Vec<(Price, AccountId)> = Vec::new();
         for &account in &market.accounts {
             let slot = market.slot(account);
-            if slot.pos == 0 {
+            if slot.pos == Qty::ZERO {
                 continue;
             }
             let previous_mark = previous_mark.expect("a market with a position had a mark before this one");
-            if !is_liquidatable(slot.pos, slot.cost, slot.locked, mark, max_leverage) {
+            if !slot.money().is_liquidatable(mark, max_leverage) {
                 continue;
             }
-            let key = liquidation_key_by_search(
-                slot.pos,
-                slot.cost,
-                slot.locked,
-                max_leverage,
-                previous_mark,
-                mark,
-            );
-            if slot.pos > 0 {
+            let key = slot.money().liquidation_key_by_search(max_leverage, previous_mark, mark);
+            if slot.pos > Qty::ZERO {
                 longs.push((Reverse(key), account));
             } else {
                 shorts.push((key, account));

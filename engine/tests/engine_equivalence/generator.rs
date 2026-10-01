@@ -58,25 +58,29 @@ use engine::command::{
 use engine::engine::{EngineSnapshot, FUND, MarketSnapshot, SlotSnapshot};
 use engine::event::Event;
 use engine::money::{NOTIONAL_LIMIT, Tier};
-use engine::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce, order_id};
+use engine::types::{
+    AccountId, MarketId, Micros, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id,
+};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::checker::withdrawal_sums;
 use super::state::{empty_slot, free_of, market_of, next_seq_of, resting_orders, slot_of};
 
-pub const MARKET_20X: MarketId = 1;
-pub const MARKET_50X: MarketId = 2;
+pub const MARKET_20X: MarketId = MarketId::new(1);
+pub const MARKET_50X: MarketId = MarketId::new(2);
 /// Never created.
-pub const NO_MARKET: MarketId = 3;
-pub const TRADERS: [AccountId; 4] = [1, 2, 3, 4];
-pub const TWINS: [AccountId; 2] = [5, 6];
+pub const NO_MARKET: MarketId = MarketId::new(3);
+pub const TRADERS: [AccountId; 4] =
+    [AccountId::new(1), AccountId::new(2), AccountId::new(3), AccountId::new(4)];
+pub const TWINS: [AccountId; 2] = [AccountId::new(5), AccountId::new(6)];
 
 // ---------------------------------------------------------------------------------------
 // The markets.
 
-const fn tier(lower_bound: Micros, max_leverage: u16) -> Tier {
-    Tier { lower_bound, max_leverage }
+/// A tier row from `lower_bound` micros.
+const fn tier(lower_bound: i64, max_leverage: u16) -> Tier {
+    Tier { lower_bound: Micros::new(lower_bound), max_leverage }
 }
 
 const TABLE_20X: [Tier; 1] = [tier(0, 20)];
@@ -121,32 +125,32 @@ pub struct MarketSpec {
 pub fn spec(market: MarketId) -> MarketSpec {
     let market_20x = MarketSpec {
         params: SetMarketParams {
-            min_price: 1_000,
-            max_price: 300_000,
+            min_price: Price::new(1_000),
+            max_price: Price::new(300_000),
             maker_fee_ppm: 125,
             taker_fee_ppm: 400,
             price_band_ppm: 22_100,
             market,
             max_leverage: 20,
         },
-        initial_mark: 100_000,
+        initial_mark: Price::new(100_000),
         tables: [&TABLE_20X, &TABLE_20X_CUT],
-        rule_2_floor: 402,
+        rule_2_floor: Price::new(402),
     };
     match market {
         MARKET_50X => MarketSpec {
             params: SetMarketParams {
-                min_price: 1_004,
-                max_price: 225_000,
+                min_price: Price::new(1_004),
+                max_price: Price::new(225_000),
                 maker_fee_ppm: -50,
                 taker_fee_ppm: 400,
                 price_band_ppm: 8_600,
                 market,
                 max_leverage: 50,
             },
-            initial_mark: 75_024,
+            initial_mark: Price::new(75_024),
             tables: [&SP500_TIERS, &SP500_TIERS_HALVED],
-            rule_2_floor: 1_004,
+            rule_2_floor: Price::new(1_004),
         },
         _ => market_20x,
     }
@@ -189,8 +193,11 @@ impl<'a> MarketView<'a> {
         self.state.and_then(|m| m.book.asks.first()).map(|o| o.price)
     }
 
+    /// The market's `max_qty`, or before it exists, the same `2^53 / max_price` (micros over
+    /// ticks is lots).
     fn max_qty(&self) -> Qty {
-        self.state.map_or(NOTIONAL_LIMIT / self.spec.params.max_price, |m| m.max_qty)
+        let before_it_exists = Qty::new(NOTIONAL_LIMIT.micros() / self.spec.params.max_price.ticks());
+        self.state.map_or(before_it_exists, |m| m.max_qty)
     }
 
     /// The live tier table (empty before the first commit).
@@ -501,29 +508,37 @@ fn side() -> impl Strategy<Value = Side> {
     prop_oneof![Just(Side::Buy), Just(Side::Sell)]
 }
 
+/// A number of ticks in `range`, as a price offset.
+fn ticks(range: std::ops::RangeInclusive<i64>) -> impl Strategy<Value = Price> {
+    range.prop_map(Price::new)
+}
+
 fn price_choice() -> impl Strategy<Value = PriceChoice> {
     prop_oneof![
-        4 => (0i64..=3).prop_map(PriceChoice::AggressiveEdge),
-        4 => (0i64..=3).prop_map(PriceChoice::PassiveEdge),
-        3 => (-3i64..=3).prop_map(PriceChoice::NearMark),
+        4 => ticks(0..=3).prop_map(PriceChoice::AggressiveEdge),
+        4 => ticks(0..=3).prop_map(PriceChoice::PassiveEdge),
+        3 => ticks(-3..=3).prop_map(PriceChoice::NearMark),
         4 => Just(PriceChoice::JustShortOfBest),
         3 => any::<Index>().prop_map(PriceChoice::InBand),
-        1 => (1i64..=3).prop_map(PriceChoice::BeyondBand),
+        1 => ticks(1..=3).prop_map(PriceChoice::BeyondBand),
         1 => any::<bool>().prop_map(|high| PriceChoice::OutOfRange { high }),
     ]
 }
 
 fn lots() -> impl Strategy<Value = Qty> {
     prop_oneof![3 => 1i64..=100, 3 => 1i64..=1_000, 2 => 1i64..=5_000, 1 => 5_000i64..=200_000]
+        .prop_map(Qty::new)
 }
 
 fn qty_choice() -> impl Strategy<Value = QtyChoice> {
     prop_oneof![
         16 => lots().prop_map(QtyChoice::Lots),
-        3 => (any::<Index>(), -2i64..=2).prop_map(|(tier, delta)| QtyChoice::NearTierBound { tier, delta }),
+        3 => (any::<Index>(), -2i64..=2)
+            .prop_map(|(tier, delta)| QtyChoice::NearTierBound { tier, delta: Qty::new(delta) }),
         1 => any::<bool>().prop_map(|over| QtyChoice::MaxQtyEdge { over }),
         1 => Just(QtyChoice::Enormous),
-        1 => prop_oneof![Just(0i64), Just(-1i64), Just(-1_000i64)].prop_map(QtyChoice::NotPositive),
+        1 => prop_oneof![Just(0i64), Just(-1i64), Just(-1_000i64)]
+            .prop_map(|qty| QtyChoice::NotPositive(Qty::new(qty))),
     ]
 }
 
@@ -565,13 +580,14 @@ fn target() -> impl Strategy<Value = Target> {
 
 fn modify_kind() -> impl Strategy<Value = ModifyKind> {
     prop_oneof![
-        3 => (0i64..=2).prop_map(|below| ModifyKind::AtOrBelowFilled { below }),
-        2 => (1i64..=500).prop_map(|by| ModifyKind::Shrink { by }),
+        3 => (0i64..=2).prop_map(|below| ModifyKind::AtOrBelowFilled { below: Qty::new(below) }),
+        2 => (1i64..=500).prop_map(|by| ModifyKind::Shrink { by: Qty::new(by) }),
         1 => Just(ModifyKind::SameSize),
-        2 => (1i64..=2_000).prop_map(|by| ModifyKind::Grow { by }),
+        2 => (1i64..=2_000).prop_map(|by| ModifyKind::Grow { by: Qty::new(by) }),
         3 => price_choice().prop_map(ModifyKind::NewPrice),
-        3 => (0i64..=2).prop_map(|through| ModifyKind::Cross { through }),
-        1 => (price_choice(), -1i64..=5_000).prop_map(|(price, size)| ModifyKind::Raw { price, size }),
+        3 => ticks(0..=2).prop_map(|through| ModifyKind::Cross { through }),
+        1 => (price_choice(), -1i64..=5_000)
+            .prop_map(|(price, size)| ModifyKind::Raw { price, size: Qty::new(size) }),
     ]
 }
 
@@ -594,6 +610,7 @@ fn deposit_value() -> impl Strategy<Value = Micros> {
         20_000_000_000,
         100_000_000_000,
     ])
+    .prop_map(Micros::new)
 }
 
 fn deposit_amount() -> impl Strategy<Value = DepositAmount> {
@@ -631,7 +648,7 @@ fn leverage_choice() -> impl Strategy<Value = LeverageChoice> {
 }
 
 fn twin_step() -> impl Strategy<Value = Step> {
-    let qty = prop_oneof![1i64..=300, 1i64..=5_000];
+    let qty = prop_oneof![1i64..=300, 1i64..=5_000].prop_map(Qty::new);
     (real_market(), side(), qty, deposit_value(), valid_leverage(), trader()).prop_map(
         |(market, side, qty, deposit, leverage, counterparty)| {
             Step::Twin(TwinStep { market, side, qty, deposit, leverage, counterparty })
@@ -691,7 +708,8 @@ pub fn step() -> impl Strategy<Value = Step> {
 }
 
 pub fn setup() -> impl Strategy<Value = Setup> {
-    let fund_deposit = prop::sample::select(vec![0, 0, 1_000_000, 1_000_000_000, 100_000_000_000]);
+    let fund_deposit =
+        prop::sample::select(vec![0, 0, 1_000_000, 1_000_000_000, 100_000_000_000]).prop_map(Micros::new);
     (
         prop::array::uniform2(prop::bool::weighted(0.125)),
         fund_deposit,
@@ -727,16 +745,19 @@ impl PriceChoice {
             (PriceChoice::PassiveEdge(offset), Side::Sell) => upper - offset,
             (PriceChoice::NearMark(offset), _) => mark + offset,
             (PriceChoice::JustShortOfBest, Side::Buy) => {
-                market.best_ask().map_or(mark, |ask| (ask - 1).min(upper))
+                market.best_ask().map_or(mark, |ask| (ask - Price::ONE_TICK).min(upper))
             }
             (PriceChoice::JustShortOfBest, Side::Sell) => {
-                market.best_bid().map_or(mark, |bid| (bid + 1).max(lower))
+                market.best_bid().map_or(mark, |bid| (bid + Price::ONE_TICK).max(lower))
             }
-            (PriceChoice::InBand(index), _) => lower + index.index((upper - lower + 1) as usize) as Price,
+            (PriceChoice::InBand(index), _) => {
+                let ticks_in_band = (upper - lower).ticks() + 1;
+                lower + Price::new(index.index(ticks_in_band as usize) as i64)
+            }
             (PriceChoice::BeyondBand(by), Side::Buy) => upper + by,
             (PriceChoice::BeyondBand(by), Side::Sell) => lower - by,
-            (PriceChoice::OutOfRange { high: true }, _) => market.spec.params.max_price + 1,
-            (PriceChoice::OutOfRange { high: false }, _) => 0,
+            (PriceChoice::OutOfRange { high: true }, _) => market.spec.params.max_price + Price::ONE_TICK,
+            (PriceChoice::OutOfRange { high: false }, _) => Price::ZERO,
         }
     }
 }
@@ -753,31 +774,36 @@ impl QtyChoice {
             QtyChoice::NearTierBound { tier, delta } => {
                 let tiers = market.tiers();
                 if tiers.len() < 2 {
-                    return 1_000;
+                    return Qty::new(1_000);
                 }
                 let bound = tiers[1 + tier.index(tiers.len() - 1)].lower_bound;
-                // The smallest size whose notional reaches the bound, give or take `delta`.
-                let target = (-(-bound).div_euclid(market.mark()) + delta).max(1);
+                // The smallest size whose notional reaches the bound (micros over ticks,
+                // rounded up), give or take `delta`.
+                let smallest = Qty::new(-(-bound.micros()).div_euclid(market.mark().ticks()));
+                let target = (smallest + delta).max(Qty::new(1));
                 let qty = target - exposure;
-                if qty >= 1 { qty } else { target }
+                if qty >= Qty::new(1) { qty } else { target }
             }
-            QtyChoice::MaxQtyEdge { over } => market.max_qty() + Qty::from(over) - exposure,
-            QtyChoice::Enormous => Qty::MAX,
+            QtyChoice::MaxQtyEdge { over } => market.max_qty() + Qty::new(i64::from(over)) - exposure,
+            QtyChoice::Enormous => Qty::new(i64::MAX),
         }
     }
 }
 
 impl MarkMove {
+    /// The new mark. A move by a rate scales the mark's bare number of ticks.
     fn resolve(self, market: &MarketView) -> Price {
-        let (base, params) = (market.mark(), market.spec.params);
+        let (base, params) = (market.mark().ticks(), market.spec.params);
         let price = match self {
             MarkMove::Step(ppm) => base + base * ppm / 1_000_000,
             MarkMove::Jump { percent, up: true } => base + base * percent / 100,
             MarkMove::Jump { percent, up: false } => base - base * percent / 100,
-            MarkMove::BackToStart => market.spec.initial_mark,
-            MarkMove::OutOfRange { high } => return if high { params.max_price + 1 } else { 0 },
+            MarkMove::BackToStart => market.spec.initial_mark.ticks(),
+            MarkMove::OutOfRange { high } => {
+                return if high { params.max_price + Price::ONE_TICK } else { Price::ZERO };
+            }
         };
-        price.clamp(params.min_price, params.max_price)
+        Price::new(price).clamp(params.min_price, params.max_price)
     }
 }
 
@@ -798,9 +824,11 @@ impl DepositAmount {
         let balance = if account == FUND { state.fund_balance } else { free_of(state, account) };
         match self {
             DepositAmount::Amount(amount) => amount,
-            DepositAmount::Zero => 0,
-            DepositAmount::Overflowing if balance > 0 => Micros::MAX - balance + 1,
-            DepositAmount::Overflowing => 0,
+            DepositAmount::Zero => Micros::ZERO,
+            DepositAmount::Overflowing if balance > Micros::ZERO => {
+                Micros::new(i64::MAX - balance.micros() + 1)
+            }
+            DepositAmount::Overflowing => Micros::ZERO,
         }
     }
 }
@@ -817,7 +845,7 @@ impl WithdrawAmount {
             WithdrawAmount::MoreThanFree => free + 1,
             WithdrawAmount::Zero => 0,
         };
-        Micros::try_from(amount).expect("a withdrawal amount fits in i64")
+        Micros::new(i64::try_from(amount).expect("a withdrawal amount fits in i64"))
     }
 }
 
@@ -835,7 +863,7 @@ fn place(
 ) -> Command {
     let seq = u32::try_from(seq).expect("sequence numbers stay small");
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(account, seq),
+        order_id: order_id(account, OrderSeq::new(seq)),
         price,
         qty,
         market,
@@ -899,7 +927,7 @@ impl Scenario {
                 commands.push(set_mark(market, spec(market).initial_mark));
             }
         }
-        if setup.fund_deposit > 0 {
+        if setup.fund_deposit > Micros::ZERO {
             commands.push(deposit(FUND, setup.fund_deposit));
         }
         for (i, &trader) in TRADERS.iter().enumerate() {
@@ -972,7 +1000,7 @@ impl Scenario {
         };
         let seq = u32::try_from(seq).expect("sequence numbers stay small");
         Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(step.account, seq),
+            order_id: order_id(step.account, OrderSeq::new(seq)),
             price,
             qty,
             market: step.market,
@@ -986,7 +1014,7 @@ impl Scenario {
     /// one that has filled something, if there is one (only those can be sized down to
     /// their fills).
     fn target_id(&self, target: Target, resting: &[RestingOrder], prefer_partly_filled: bool) -> OrderId {
-        let partly_filled: Vec<&RestingOrder> = resting.iter().filter(|o| o.filled > 0).collect();
+        let partly_filled: Vec<&RestingOrder> = resting.iter().filter(|o| o.filled > Qty::ZERO).collect();
         match target {
             Target::Resting(index) if prefer_partly_filled && !partly_filled.is_empty() => {
                 partly_filled[index.index(partly_filled.len())].order_id
@@ -996,7 +1024,7 @@ impl Scenario {
                 self.issued[index.index(self.issued.len())]
             }
             // Nothing issued yet: an id that never existed.
-            _ => order_id(TRADERS[0], 999_999),
+            _ => order_id(TRADERS[0], OrderSeq::new(999_999)),
         }
     }
 
@@ -1017,16 +1045,18 @@ impl Scenario {
             // Not resting here: rejected `UnknownOrder`, whatever the price and size.
             return match kind {
                 ModifyKind::Raw { price, size } => modify(price.resolve(Side::Buy, &market), size),
-                _ => modify(market.mark(), 1),
+                _ => modify(market.mark(), Qty::new(1)),
             };
         };
-        let total = order.filled + order.qty;
+        let (total, one_lot) = (order.filled + order.qty, Qty::new(1));
         match kind {
             // With nothing filled, the size is 0: rejected `InvalidQty`.
             ModifyKind::AtOrBelowFilled { below } => {
-                modify(order.price, if order.filled == 0 { 0 } else { (order.filled - below).max(1) })
+                let size =
+                    if order.filled == Qty::ZERO { Qty::ZERO } else { (order.filled - below).max(one_lot) };
+                modify(order.price, size)
             }
-            ModifyKind::Shrink { by } => modify(order.price, order.filled + (order.qty - by).max(1)),
+            ModifyKind::Shrink { by } => modify(order.price, order.filled + (order.qty - by).max(one_lot)),
             ModifyKind::SameSize => modify(order.price, total),
             ModifyKind::Grow { by } => modify(order.price, total + by),
             ModifyKind::NewPrice(price) => modify(price.resolve(order.side, &market), total),
@@ -1052,9 +1082,9 @@ impl Scenario {
         let Some(snapshot) = market_of(state, market) else { return Vec::new() };
         let staged = usize::from(snapshot.staged_rows);
         if staged == 0 {
-            self.staging[usize::from(market)] = table;
+            self.staging[market.index()] = table;
         }
-        let table = spec(market).tables[self.staging[usize::from(market)]];
+        let table = spec(market).tables[self.staging[market.index()]];
         (staged..table.len()).take(rows).map(|index| tier_row(market, table, index)).collect()
     }
 
@@ -1090,8 +1120,8 @@ fn resolve_twin(step: &TwinStep, state: &EngineSnapshot) -> Vec<Command> {
             commands.push(set_leverage(twin, step.market, leverage));
         }
     }
-    let low = market.best_bid().map_or(market.lower(), |bid| bid + 1).max(market.lower());
-    let high = market.best_ask().map_or(market.upper(), |ask| ask - 1).min(market.upper());
+    let low = market.best_bid().map_or(market.lower(), |bid| bid + Price::ONE_TICK).max(market.lower());
+    let high = market.best_ask().map_or(market.upper(), |ask| ask - Price::ONE_TICK).min(market.upper());
     if !market.has_mark() || low > high {
         return commands;
     }
@@ -1107,7 +1137,7 @@ fn resolve_twin(step: &TwinStep, state: &EngineSnapshot) -> Vec<Command> {
         step.market,
         step.side.opposite(),
         price,
-        2 * step.qty,
+        Qty::new(2 * step.qty.lots()),
         TimeInForce::Gtc,
     );
     commands.push(resting);
@@ -1126,20 +1156,20 @@ fn resolve_twin(step: &TwinStep, state: &EngineSnapshot) -> Vec<Command> {
 /// its own counterparty, just sends its order.
 fn resolve_close(step: &CloseStep, state: &EngineSnapshot) -> Vec<Command> {
     let market = MarketView::new(state, step.market);
-    let holders: Vec<AccountId> = TRADERS.into_iter().filter(|&t| market.slot(t).pos != 0).collect();
+    let holders: Vec<AccountId> = TRADERS.into_iter().filter(|&t| market.slot(t).pos != Qty::ZERO).collect();
     let account = if holders.is_empty() { TRADERS[0] } else { holders[step.account.index(holders.len())] };
     let pos = market.slot(account).pos;
-    let side = if pos > 0 { Side::Sell } else { Side::Buy };
-    let price = PriceChoice::AggressiveEdge(0).resolve(side, &market);
+    let side = if pos > Qty::ZERO { Side::Sell } else { Side::Buy };
+    let price = PriceChoice::AggressiveEdge(Price::ZERO).resolve(side, &market);
     let qty = match step.size {
         CloseSize::All => pos.abs(),
-        CloseSize::Twice => 2 * pos.abs(),
-        CloseSize::OneLot => 1,
+        CloseSize::Twice => Qty::new(2 * pos.abs().lots()),
+        CloseSize::OneLot => Qty::new(1),
     };
     let seq = next_seq_of(state, account);
     let (other, other_seq) = (step.counterparty, next_seq_of(state, step.counterparty));
-    let (market_id, qty) = (step.market, qty.max(1));
-    if pos == 0 || other == account {
+    let (market_id, qty) = (step.market, qty.max(Qty::new(1)));
+    if pos == Qty::ZERO || other == account {
         return vec![place(account, seq, market_id, side, price, qty, step.tif)];
     }
     let counterparty = |tif| place(other, other_seq, market_id, side.opposite(), price, qty, tif);
@@ -1161,15 +1191,15 @@ fn bad_tier_row(market: MarketId, kind: BadTierRow, state: &EngineSnapshot) -> C
         Command::SetRiskTier(SetRiskTier { lower_bound, market, max_leverage, index, count })
     };
     match kind {
-        BadTierRow::SkipsAhead if staged == 0 => row(1, 8, 1, 1),
-        BadTierRow::SkipsAhead => row(staged + 1, count, Micros::MAX, 1),
-        BadTierRow::LeverageAboveMax => row(0, 1, 0, max_leverage + 1),
-        BadTierRow::TooManyRows => row(0, 9, 0, max_leverage),
+        BadTierRow::SkipsAhead if staged == 0 => row(1, 8, Micros::new(1), 1),
+        BadTierRow::SkipsAhead => row(staged + 1, count, Micros::new(i64::MAX), 1),
+        BadTierRow::LeverageAboveMax => row(0, 1, Micros::ZERO, max_leverage + 1),
+        BadTierRow::TooManyRows => row(0, 9, Micros::ZERO, max_leverage),
         BadTierRow::BoundNotRising if staged > 0 => {
             let previous = staged_rows[usize::from(staged) - 1];
             row(staged, count, previous.lower_bound, previous.max_leverage)
         }
-        BadTierRow::FirstBoundNotZero | BadTierRow::BoundNotRising => row(0, 1, 1, max_leverage),
+        BadTierRow::FirstBoundNotZero | BadTierRow::BoundNotRising => row(0, 1, Micros::new(1), max_leverage),
     }
 }
 
@@ -1180,9 +1210,11 @@ fn market_params(market: MarketId, bad: Option<BadParams>) -> SetMarketParams {
         Some(BadParams::BandTooWide) => {
             SetMarketParams { price_band_ppm: params.price_band_ppm + 1, ..params }
         }
-        Some(BadParams::MinPriceBelowRule2) => SetMarketParams { min_price: rule_2_floor - 1, ..params },
+        Some(BadParams::MinPriceBelowRule2) => {
+            SetMarketParams { min_price: rule_2_floor - Price::ONE_TICK, ..params }
+        }
         Some(BadParams::RangeTooWide) => {
-            SetMarketParams { max_price: params.min_price + (1 << 24), ..params }
+            SetMarketParams { max_price: params.min_price + Price::new(1 << 24), ..params }
         }
         Some(BadParams::NoLeverage) => SetMarketParams { max_leverage: 0, ..params },
         Some(BadParams::NegativeTakerFee) => SetMarketParams { taker_fee_ppm: -1, ..params },

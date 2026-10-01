@@ -69,47 +69,51 @@ use engine::command::{
 use engine::engine::{Engine, EngineOptions, FUND, MarketSnapshot, SlotSnapshot};
 use engine::event::{CancelReason, Event, EventSink, PositionChanged};
 use engine::mode::Mode;
-use engine::money::{is_liquidatable, liquidation_key};
-use engine::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce, order_id};
+use engine::money::SlotMoney;
+use engine::types::{
+    AccountId, MarketId, Micros, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id,
+};
 
 use crate::{CountingSink, Depth};
 
 /// The benchmarks' market.
-pub const MARKET: MarketId = 1;
+pub const MARKET: MarketId = MarketId::new(1);
 /// The mark every scenario opens at, and always comes back to.
-pub const MARK: Price = 10_000;
+pub const MARK: Price = Price::new(10_000);
 /// The market's maximum leverage, and the leverage of every account but the maker.
 pub const LEVERAGE: u16 = 10;
 /// What every account deposits, and the insurance fund too: $1 billion, far more than any
 /// benchmark uses however long it runs. (Each liquidation that ablation B undoes locks a
 /// little more of the maker's and the near accounts' free balance.)
-pub const DEPOSIT: Micros = 1_000_000_000_000_000;
+pub const DEPOSIT: Micros = Micros::new(1_000_000_000_000_000);
 /// How many timed accounts there are. A timed round sends one command for each, and reads
 /// the clock once, so the cost of reading it is shared by 16 commands.
 pub const TIMED_ACCOUNTS: usize = 16;
 
-const MAKER: AccountId = 1;
-const FIRST_TIMED: AccountId = 101;
-const FIRST_FILLER: AccountId = 201;
-const FIRST_POPULATION: AccountId = 1_000_000;
+const MAKER: AccountId = AccountId::new(1);
+/// The first account number of each group (module docs, "The accounts"). A group's `i`-th
+/// account is number `first + i`, made an id with `AccountId::new`.
+const FIRST_TIMED: u32 = 101;
+const FIRST_FILLER: u32 = 201;
+const FIRST_POPULATION: u32 = 1_000_000;
 /// The size of every population long.
-const POPULATION_LOTS: Qty = 100;
+const POPULATION_LOTS: Qty = Qty::new(100);
 /// Far longs are bought at this many prices, from one tick below the mark downwards.
 const FAR_PRICES: usize = 400;
 /// The price of the lowest near long. Each next one is bought one tick higher.
-const NEAR_LOWEST_PRICE: Price = MARK + 201;
+const NEAR_LOWEST_PRICE: Price = Price::new(MARK.ticks() + 201);
 /// The size of each timed account's long: large next to its `k` bids, so that the collateral
 /// they need barely moves its key.
-const TIMED_POSITION: Qty = 100_000;
+const TIMED_POSITION: Qty = Qty::new(100_000);
 /// The price of every timed bid, and the highest price of the resting bids: 200 ticks below
 /// the mark, so below every ask.
-const TIMED_BID_PRICE: Price = MARK - 200;
+const TIMED_BID_PRICE: Price = Price::new(MARK.ticks() - 200);
 /// The resting bids are spread over this many prices, from `TIMED_BID_PRICE` downwards.
 const RESTING_BID_PRICES: usize = 50;
 /// The size of a timed bid. Its top-up, 1,000,000 micros, moves the account's key by about
 /// 10 ticks, so every timed place and cancel moves the account's entry in the liquidation
 /// index (in the modes that keep one).
-const TIMED_LOTS: Qty = 1_000;
+const TIMED_LOTS: Qty = Qty::new(1_000);
 
 // ---------------------------------------------------------------------------------------
 // Commands shared with the other risk benchmarks.
@@ -117,8 +121,8 @@ const TIMED_LOTS: Qty = 1_000;
 /// The parameters of the benchmarks' market (module docs).
 pub fn market_params() -> SetMarketParams {
     SetMarketParams {
-        min_price: 1_000,
-        max_price: 20_000,
+        min_price: Price::new(1_000),
+        max_price: Price::new(20_000),
         maker_fee_ppm: 125,
         taker_fee_ppm: 400,
         price_band_ppm: 44_600,
@@ -130,7 +134,8 @@ pub fn market_params() -> SetMarketParams {
 /// The commands that open the market, in the order RISK.md 3.3 requires: its parameters, a
 /// one-row tier table, and the first mark.
 pub fn open_market() -> [Command; 3] {
-    let tier = SetRiskTier { lower_bound: 0, market: MARKET, max_leverage: LEVERAGE, index: 0, count: 1 };
+    let tier =
+        SetRiskTier { lower_bound: Micros::ZERO, market: MARKET, max_leverage: LEVERAGE, index: 0, count: 1 };
     [Command::SetMarketParams(market_params()), Command::SetRiskTier(tier), set_mark(MARK)]
 }
 
@@ -172,9 +177,9 @@ pub struct ScenarioConfig {
 #[derive(Debug)]
 pub struct Scenario<M> {
     pub engine: Engine<Book, M>,
-    /// The account of the lowest near long; the others follow it, one account and one tick
-    /// higher each.
-    first_near: AccountId,
+    /// The account number of the lowest near long; the others follow it, one account and one
+    /// tick higher each.
+    first_near: u32,
     near_positions: usize,
     /// The last order sequence number used. One counter for every account keeps each
     /// account's sequence numbers rising, as the engine requires (RISK.md 3.1).
@@ -205,7 +210,7 @@ impl<M: Mode> Scenario<M> {
         };
         let mut scenario = Scenario {
             engine: Engine::new(options),
-            first_near: FIRST_POPULATION + far_positions as AccountId,
+            first_near: FIRST_POPULATION + far_positions as u32,
             near_positions: config.near_positions,
             last_seq: 0,
             places: Vec::with_capacity(TIMED_ACCOUNTS),
@@ -240,18 +245,20 @@ impl<M: Mode> Scenario<M> {
 
     /// The price a near account buys its long at.
     fn near_price(&self, account: AccountId) -> Price {
-        let near_accounts = self.first_near..self.first_near + self.near_positions as AccountId;
-        assert!(near_accounts.contains(&account), "{account} is not a near account");
-        NEAR_LOWEST_PRICE + Price::from(account - self.first_near)
+        let near_accounts = self.first_near..self.first_near + self.near_positions as u32;
+        assert!(near_accounts.contains(&account.get()), "{account} is not a near account");
+        NEAR_LOWEST_PRICE + Price::new(i64::from(account.get() - self.first_near))
     }
 
     /// The far longs: population account `i` buys at `MARK − 1 − (i mod 400)`. Taken one
     /// price at a time, so that the maker rests one ask per price.
     fn open_far_longs(&mut self, count: usize) {
         for group in 0..FAR_PRICES.min(count) {
-            let price = MARK - 1 - group as Price;
-            let accounts: Vec<AccountId> =
-                (group..count).step_by(FAR_PRICES).map(|i| FIRST_POPULATION + i as AccountId).collect();
+            let price = MARK - Price::new(1 + group as i64);
+            let accounts: Vec<AccountId> = (group..count)
+                .step_by(FAR_PRICES)
+                .map(|i| AccountId::new(FIRST_POPULATION + i as u32))
+                .collect();
             self.fund_all(&accounts);
             self.buy_from_maker(&accounts, POPULATION_LOTS, price);
         }
@@ -260,7 +267,7 @@ impl<M: Mode> Scenario<M> {
     /// The near longs, each at a price of its own, one tick apart.
     fn open_near_longs(&mut self) {
         for offset in 0..self.near_positions {
-            let account = self.first_near + offset as AccountId;
+            let account = AccountId::new(self.first_near + offset as u32);
             self.fund_all(&[account]);
             self.reopen(account);
         }
@@ -289,10 +296,10 @@ impl<M: Mode> Scenario<M> {
             self.fund_all(&fillers);
         }
         for round in 0..depth {
-            let price = TIMED_BID_PRICE - (round % RESTING_BID_PRICES) as Price;
+            let price = TIMED_BID_PRICE - Price::new((round % RESTING_BID_PRICES) as i64);
             for t in 0..TIMED_ACCOUNTS {
                 let owner = if round < k { timed_account(t) } else { filler_account(t) };
-                let bid = self.new_order(owner, Side::Buy, price, 1, TimeInForce::Gtc);
+                let bid = self.new_order(owner, Side::Buy, price, Qty::new(1), TimeInForce::Gtc);
                 self.run(bid);
             }
         }
@@ -306,16 +313,16 @@ impl<M: Mode> Scenario<M> {
         }
     }
 
-    /// Opens a long of `lots` at `price` for each of `accounts`. The maker rests one ask for
-    /// all of them, and each account takes its share with an IOC buy. Nothing else rests on
-    /// the ask side, so every buy fills in full at `price` (an unfilled remainder would be a
-    /// cancel, which the setup sink refuses), and the ask side is empty again afterwards.
-    fn buy_from_maker(&mut self, accounts: &[AccountId], lots: Qty, price: Price) {
-        let total = lots * accounts.len() as Qty;
+    /// Opens a long of `each` lots at `price` for each of `accounts`. The maker rests one ask
+    /// for all of them, and each account takes its share with an IOC buy. Nothing else rests
+    /// on the ask side, so every buy fills in full at `price` (an unfilled remainder would be
+    /// a cancel, which the setup sink refuses), and the ask side is empty again afterwards.
+    fn buy_from_maker(&mut self, accounts: &[AccountId], each: Qty, price: Price) {
+        let total = Qty::new(each.lots() * accounts.len() as i64);
         let ask = self.new_order(MAKER, Side::Sell, price, total, TimeInForce::Gtc);
         self.run(ask);
         for &account in accounts {
-            let buy = self.new_order(account, Side::Buy, price, lots, TimeInForce::Ioc);
+            let buy = self.new_order(account, Side::Buy, price, each, TimeInForce::Ioc);
             self.run(buy);
         }
     }
@@ -335,18 +342,18 @@ impl<M: Mode> Scenario<M> {
 
     fn next_order_id(&mut self, account: AccountId) -> OrderId {
         self.last_seq = self.last_seq.checked_add(1).expect("the scenario ran out of sequence numbers");
-        order_id(account, self.last_seq)
+        order_id(account, OrderSeq::new(self.last_seq))
     }
 }
 
 /// The `t`-th timed account.
 fn timed_account(t: usize) -> AccountId {
-    FIRST_TIMED + t as AccountId
+    AccountId::new(FIRST_TIMED + t as u32)
 }
 
 /// The filler account beside the `t`-th timed account.
 fn filler_account(t: usize) -> AccountId {
-    FIRST_FILLER + t as AccountId
+    AccountId::new(FIRST_FILLER + t as u32)
 }
 
 /// The sink for setup commands. None may be rejected or liquidate anything, and none may
@@ -491,7 +498,7 @@ impl RoundProbe {
         );
         let probe = RoundProbe { top_up, key_without: long_key(&without), key_with: long_key(&with) };
         assert!(
-            top_up > 0 && probe.key_without != probe.key_with,
+            top_up > Micros::ZERO && probe.key_without != probe.key_with,
             "the top-up didn't move the key: {probe:?}"
         );
         probe
@@ -517,7 +524,8 @@ impl fmt::Display for RoundProbe {
 
 /// The liquidation key of a long, from the slot's state in a `PositionChanged`.
 fn long_key(slot: &PositionChanged) -> Option<Price> {
-    liquidation_key(slot.position, slot.cost_basis, slot.locked, LEVERAGE).map(|(_, key)| key)
+    let money = SlotMoney { pos: slot.position, cost: slot.cost_basis, locked: slot.locked };
+    money.liquidation_key(LEVERAGE).map(|(_, key)| key)
 }
 
 /// Applies one command and returns its events. Allocates: outside timing only.
@@ -640,7 +648,7 @@ impl MarketView {
 
     /// Slots with a position. (The insurance fund has no slot.)
     pub fn positions(&self) -> usize {
-        self.market.slots.iter().filter(|slot| slot.pos != 0).count()
+        self.market.slots.iter().filter(|slot| slot.pos != Qty::ZERO).count()
     }
 
     /// Slots with a liquidation key: the entries of the liquidation index, in the modes that
@@ -676,8 +684,8 @@ impl MarketView {
     /// independent of the keys.
     pub fn liquidatable_at(&self, mark: Price) -> usize {
         let max_leverage = self.market.params.max_leverage;
-        let slots = self.market.slots.iter();
-        slots.filter(|slot| is_liquidatable(slot.pos, slot.cost, slot.locked, mark, max_leverage)).count()
+        let below_mm = |slot: &SlotSnapshot| slot.money().is_liquidatable(mark, max_leverage);
+        self.market.slots.iter().filter(|slot| below_mm(slot)).count()
     }
 
     /// A mark at which exactly `count` slots are liquidatable, all of them longs: one tick
@@ -688,7 +696,7 @@ impl MarketView {
     pub fn mark_liquidating(&self, count: usize) -> Price {
         let keys = self.long_keys();
         let mark = if count == 0 {
-            keys[0] + 1
+            keys[0] + Price::ONE_TICK
         } else {
             let exact = keys.get(count).is_none_or(|&next| next < keys[count - 1]);
             assert!(exact, "the {count}th and the next highest long keys are equal");
@@ -699,7 +707,7 @@ impl MarketView {
     }
 
     fn key(&self, slot: &SlotSnapshot) -> Option<(Side, Price)> {
-        liquidation_key(slot.pos, slot.cost, slot.locked, self.market.params.max_leverage)
+        slot.money().liquidation_key(self.market.params.max_leverage)
     }
 }
 
@@ -714,7 +722,7 @@ impl fmt::Display for MarketView {
             self.slots(),
             self.resting_orders()
         )?;
-        if self.market.fund_pos != 0 {
+        if self.market.fund_pos != Qty::ZERO {
             write!(f, ", and the insurance fund holds {} lots", self.market.fund_pos)?;
         }
         Ok(())
@@ -769,8 +777,11 @@ mod tests {
             let mut scenario = Scenario::<M>::build(SMALL);
             let probe = scenario.probe_round();
             // IM(1,000 lots) at leverage 10; the key of a long of 100,000 holding IM(100,003).
-            assert_eq!(probe.top_up, 1_000_000);
-            assert_eq!((probe.key_without, probe.key_with), (Some(9_473), Some(9_463)));
+            assert_eq!(probe.top_up, Micros::new(1_000_000));
+            assert_eq!(
+                (probe.key_without, probe.key_with),
+                (Some(Price::new(9_473)), Some(Price::new(9_463)))
+            );
 
             let before = state_without_sequences(scenario.engine.snapshot());
             // 40 is not a multiple of 16, so the last round of each loop is a partial one.
@@ -791,8 +802,8 @@ mod tests {
             let view = MarketView::of(&scenario.engine);
             let keys = view.long_keys();
             // The near keys, 9,793 down to 9,689, are the 100 highest.
-            assert_eq!((keys[0], keys[99]), (9_793, 9_689));
-            assert!(keys[100] < 9_689);
+            assert_eq!((keys[0], keys[99]), (Price::new(9_793), Price::new(9_689)));
+            assert!(keys[100] < Price::new(9_689));
 
             for liquidations in [1, 100] {
                 let mark = view.mark_liquidating(liquidations);
@@ -805,7 +816,7 @@ mod tests {
             assert_eq!(after.market.mark, Some(MARK));
             assert_eq!(after.long_keys(), keys, "reopening gave the longs other keys");
             // The fund now holds what it took over: 3 × (1 + 100) longs of 100 lots.
-            assert_eq!(after.market.fund_pos, 3 * 101 * 100);
+            assert_eq!(after.market.fund_pos, Qty::new(3 * 101 * 100));
             scenario.engine.assert_invariants();
         }
         check::<Fast>();

@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use engine::command::{Command, PlaceOrder};
-use engine::types::{Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use gateway::eip712::{Address, Domain};
 use gateway::keccak::keccak256;
 use gateway::wire::{
@@ -295,13 +295,16 @@ pub struct SignCosts {
     pub sha256_72_ns: u64,
 }
 
+/// The account of the benchmark's sample messages: the worked example's (5.6).
+const SAMPLE_ACCOUNT: AccountId = AccountId::new(9);
+
 /// The command of the benchmark's sample messages: the worked example's place (5.6).
 fn sample_command() -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(9, 1),
-        price: 102_998,
-        qty: 500_000,
-        market: 3,
+        order_id: order_id(SAMPLE_ACCOUNT, OrderSeq::new(1)),
+        price: Price::new(102_998),
+        qty: Qty::new(500_000),
+        market: MarketId::new(3),
         side: Side::Buy,
         tif: TimeInForce::Gtc,
         post_only: true,
@@ -310,8 +313,8 @@ fn sample_command() -> Command {
 
 /// A signed message of the benchmark's kind: the part that is signed, and its signature.
 fn sample_signed() -> (SigningKey, [u8; 72], [u8; SIGNATURE_BYTES]) {
-    let key = loadgen::keys::signing_key(1, 9);
-    let signed = encode_signed_part(1, 9, 1, u64::MAX, &sample_command());
+    let key = loadgen::keys::signing_key(1, SAMPLE_ACCOUNT);
+    let signed = encode_signed_part(1, SAMPLE_ACCOUNT, 1, u64::MAX, &sample_command());
     let signature: Signature = key.sign(&signed);
     (key, signed, signature.to_bytes().into())
 }
@@ -369,9 +372,9 @@ struct Eip712Sample {
 
 impl Eip712Sample {
     fn new() -> Eip712Sample {
-        let key = loadgen::keys::signing_key(1, 9);
+        let key = loadgen::keys::signing_key(1, SAMPLE_ACCOUNT);
         let domain = Domain::new(1);
-        let message = sign_eip712(&key, &domain, 9, 1, 1_790_000_000_000, &sample_command());
+        let message = sign_eip712(&key, &domain, SAMPLE_ACCOUNT, 1, 1_790_000_000_000, &sample_command());
         Eip712Sample {
             domain,
             decoded: decode_eip712(&message).expect("the gateway decodes it"),

@@ -73,7 +73,9 @@ use engine::command::{
     SetRiskTier, Withdraw,
 };
 use engine::engine::{EngineOptions, FUND};
-use engine::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce, order_id};
+use engine::types::{
+    AccountId, MarketId, Micros, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id,
+};
 use k256::sha2::{Digest, Sha256};
 
 use crate::SplitMix64;
@@ -135,13 +137,13 @@ pub const MARKET_CLASSES: [MarketClass; 3] = [
 
 /// Market `market`'s class: `market mod 3`.
 pub fn class_of(market: MarketId) -> MarketClass {
-    MARKET_CLASSES[usize::from(market) % 3]
+    MARKET_CLASSES[usize::from(market.get()) % 3]
 }
 
 /// Market `market`'s starting fair value `F0`: `100,000 + 1,000 × market` ticks, so every
 /// market has its own price level.
 pub fn start_fair_value(market: MarketId) -> Price {
-    100_000 + 1_000 * Price::from(market)
+    Price::new(100_000 + 1_000 * i64::from(market.get()))
 }
 
 /// Market `market`'s parameters: prices from `F0 / 2` to `2 × F0`, and its class's leverage,
@@ -150,8 +152,8 @@ pub fn start_fair_value(market: MarketId) -> Price {
 pub fn market_params(market: MarketId) -> SetMarketParams {
     let (fair, class) = (start_fair_value(market), class_of(market));
     SetMarketParams {
-        min_price: fair / 2,
-        max_price: 2 * fair,
+        min_price: Price::new(fair.ticks() / 2),
+        max_price: Price::new(2 * fair.ticks()),
         maker_fee_ppm: class.maker_fee_ppm,
         taker_fee_ppm: class.taker_fee_ppm,
         price_band_ppm: class.band_ppm,
@@ -161,19 +163,26 @@ pub fn market_params(market: MarketId) -> SetMarketParams {
 }
 
 // ---------------------------------------------------------------------------------------
-// Accounts (14.3).
+// Accounts (14.3). Each cohort is a range of account numbers from its base: the bases are
+// numbers, so that a cohort's `i`-th account is `base + i`, and an account's id is
+// `AccountId::new` of its number.
 
 /// Market maker `j` of market `m` is account `(m − 1) × makers_per_market + j + 1`.
-pub const MAKER_BASE: AccountId = 1;
+pub const MAKER_BASE: u32 = 1;
 /// Takers are accounts 1,001 onwards.
-pub const TAKER_BASE: AccountId = 1_001;
+pub const TAKER_BASE: u32 = 1_001;
 /// High-leverage accounts are 5,001 onwards.
-pub const HIGH_LEVERAGE_BASE: AccountId = 5_001;
+pub const HIGH_LEVERAGE_BASE: u32 = 5_001;
 /// The thin layer's accounts are 7,001 onwards.
-pub const THIN_BASE: AccountId = 7_001;
+pub const THIN_BASE: u32 = 7_001;
 
 /// One dollar in micros (D-004).
-pub const DOLLAR: Micros = 1_000_000;
+pub const DOLLAR: Micros = Micros::new(1_000_000);
+
+/// `n` whole dollars, in micros.
+pub const fn dollars(n: i64) -> Micros {
+    Micros::new(n * DOLLAR.micros())
+}
 
 /// Which cohort an account belongs to (14.3), with what the flow needs to know about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,8 +213,8 @@ pub struct MarketFlowConfig {
     pub seed: u64,
 
     // ---- Markets and their fair values (14.2, 14.5).
-    /// Markets `1..=markets`: 67.
-    pub markets: MarketId,
+    /// Markets `1..=markets`: 67. A count, not a market id.
+    pub markets: u16,
     /// Flow time between two fair-value steps of one market: 15 ms. Market `m`'s steps are
     /// at `m × step_ns / markets + i × step_ns`, so the markets' steps are spread evenly.
     pub step_ns: u64,
@@ -319,43 +328,43 @@ impl MarketFlowConfig {
             seed: 1,
             markets: 67,
             step_ns: 15_000_000,
-            max_step: 3,
+            max_step: Price::new(3),
             jump_one_in: 15_000,
             jump_min_ppm: 20_000,
             jump_max_ppm: 60_000,
-            fair_margin: 100,
+            fair_margin: Price::new(100),
             mark_every_ns: 100_000_000,
-            mark_noise: 2,
+            mark_noise: Price::new(2),
             makers_per_market: 4,
             maker_levels: 3,
-            maker_min_size: 200_000,
-            maker_max_size: 1_000_000,
+            maker_min_size: Qty::new(200_000),
+            maker_max_size: Qty::new(1_000_000),
             refresh_one_in: 64,
-            maker_deposit: 1_000_000 * DOLLAR,
+            maker_deposit: dollars(1_000_000),
             maker_leverage: 5,
             takers: 2_000,
             taker_every_ns: 250_000,
-            taker_min_qty: 1_000,
-            taker_max_qty: 20_000,
-            taker_deposit: 1_000_000 * DOLLAR,
-            cross: 10,
+            taker_min_qty: Qty::new(1_000),
+            taker_max_qty: Qty::new(20_000),
+            taker_deposit: dollars(1_000_000),
+            cross: Price::new(10),
             high_leverage_per_market: 6,
             high_leverage_every_ns: 25_000_000,
-            high_leverage_min_qty: 15_000,
-            high_leverage_max_qty: 30_000,
+            high_leverage_min_qty: Qty::new(15_000),
+            high_leverage_max_qty: Qty::new(30_000),
             high_leverage_setup_iocs: 3,
-            high_leverage_deposit: 10_000 * DOLLAR,
+            high_leverage_deposit: dollars(10_000),
             thin_accounts: 200,
             thin_orders_each: 5,
             thin_min_band_percent: 40,
             thin_max_band_percent: 80,
-            thin_min_qty: 1_000,
-            thin_max_qty: 5_000,
+            thin_min_qty: Qty::new(1_000),
+            thin_max_qty: Qty::new(5_000),
             thin_replace_every_ns: 30_000_000_000,
-            thin_deposit: 100_000 * DOLLAR,
+            thin_deposit: dollars(100_000),
             withdrawal_every_ns: 1_000_000_000,
-            withdrawal_amount: 1_000 * DOLLAR,
-            fund_deposit: 1_000 * DOLLAR,
+            withdrawal_amount: dollars(1_000),
+            fund_deposit: dollars(1_000),
         }
     }
 
@@ -401,13 +410,14 @@ impl MarketFlowConfig {
         let c = self;
         let makers = u64::from(c.markets) * u64::from(c.makers_per_market);
         let high_leverage = u64::from(c.markets) * u64::from(c.high_leverage_per_market);
+        // Each range's two ends, as bare numbers (ppm, lots or percent).
         let ranges = [
             (c.jump_min_ppm, c.jump_max_ppm),
-            (c.maker_min_size, c.maker_max_size),
-            (c.taker_min_qty, c.taker_max_qty),
-            (c.high_leverage_min_qty, c.high_leverage_max_qty),
+            (c.maker_min_size.lots(), c.maker_max_size.lots()),
+            (c.taker_min_qty.lots(), c.taker_max_qty.lots()),
+            (c.high_leverage_min_qty.lots(), c.high_leverage_max_qty.lots()),
             (c.thin_min_band_percent, c.thin_max_band_percent),
-            (c.thin_min_qty, c.thin_max_qty),
+            (c.thin_min_qty.lots(), c.thin_max_qty.lots()),
         ];
         let periods =
             [c.step_ns, c.mark_every_ns, c.taker_every_ns, c.high_leverage_every_ns, c.withdrawal_every_ns];
@@ -421,7 +431,7 @@ impl MarketFlowConfig {
                 high_leverage <= u64::from(THIN_BASE - HIGH_LEVERAGE_BASE),
                 "at most 2,000 high-leverage accounts",
             ),
-            (c.thin_accounts <= FUND - THIN_BASE, "thin accounts below the fund's id"),
+            (c.thin_accounts <= FUND.get() - THIN_BASE, "thin accounts below the fund's id"),
             (c.jump_one_in >= 1 && c.refresh_one_in >= 1, "probabilities of 1 in at least 1"),
             (ranges.iter().all(|(low, high)| low <= high), "every range's low end at or below its high end"),
             (periods.iter().all(|&period| period > 0), "periods above zero"),
@@ -485,43 +495,43 @@ impl MarketFlowConfig {
             seed,
             u64::from(markets),
             step_ns,
-            max_step as u64,
+            max_step.ticks() as u64,
             jump_one_in,
             jump_min_ppm as u64,
             jump_max_ppm as u64,
-            fair_margin as u64,
+            fair_margin.ticks() as u64,
             mark_every_ns,
-            mark_noise as u64,
+            mark_noise.ticks() as u64,
             u64::from(makers_per_market),
             u64::from(maker_levels),
-            maker_min_size as u64,
-            maker_max_size as u64,
+            maker_min_size.lots() as u64,
+            maker_max_size.lots() as u64,
             refresh_one_in,
-            maker_deposit as u64,
+            maker_deposit.micros() as u64,
             u64::from(maker_leverage),
             u64::from(takers),
             taker_every_ns,
-            taker_min_qty as u64,
-            taker_max_qty as u64,
-            taker_deposit as u64,
-            cross as u64,
+            taker_min_qty.lots() as u64,
+            taker_max_qty.lots() as u64,
+            taker_deposit.micros() as u64,
+            cross.ticks() as u64,
             u64::from(high_leverage_per_market),
             high_leverage_every_ns,
-            high_leverage_min_qty as u64,
-            high_leverage_max_qty as u64,
+            high_leverage_min_qty.lots() as u64,
+            high_leverage_max_qty.lots() as u64,
             u64::from(high_leverage_setup_iocs),
-            high_leverage_deposit as u64,
+            high_leverage_deposit.micros() as u64,
             u64::from(thin_accounts),
             u64::from(thin_orders_each),
             thin_min_band_percent as u64,
             thin_max_band_percent as u64,
-            thin_min_qty as u64,
-            thin_max_qty as u64,
+            thin_min_qty.lots() as u64,
+            thin_max_qty.lots() as u64,
             thin_replace_every_ns,
-            thin_deposit as u64,
+            thin_deposit.micros() as u64,
             withdrawal_every_ns,
-            withdrawal_amount as u64,
-            fund_deposit as u64,
+            withdrawal_amount.micros() as u64,
+            fund_deposit.micros() as u64,
         ];
         let mut hasher = Sha256::new();
         hasher.update(b"perps-loadgen market flow");
@@ -533,7 +543,7 @@ impl MarketFlowConfig {
 
     /// Market maker `index` of `market`.
     pub fn maker(&self, market: MarketId, index: u32) -> AccountId {
-        MAKER_BASE + (u32::from(market) - 1) * self.makers_per_market + index
+        AccountId::new(MAKER_BASE + (u32::from(market.get()) - 1) * self.makers_per_market + index)
     }
 
     /// High-leverage account `index` (0-based, `0..markets × per market`): its account, and
@@ -541,25 +551,27 @@ impl MarketFlowConfig {
     /// `i mod per market` is in the first half.
     pub fn high_leverage(&self, index: u32) -> (AccountId, MarketId, Side) {
         let per_market = self.high_leverage_per_market;
-        let market = MarketId::try_from(index / per_market + 1).expect("markets fit a MarketId");
+        let market = MarketId::new(u16::try_from(index / per_market + 1).expect("markets fit a MarketId"));
         let side = if index % per_market < per_market / 2 { Side::Buy } else { Side::Sell };
-        (HIGH_LEVERAGE_BASE + index, market, side)
+        (AccountId::new(HIGH_LEVERAGE_BASE + index), market, side)
     }
 
     /// The cohort of `account`, or `None` if the flow doesn't use it.
     pub fn cohort_of(&self, account: AccountId) -> Option<Cohort> {
         let makers = u32::from(self.markets) * self.makers_per_market;
         let high_leverage = u32::from(self.markets) * self.high_leverage_per_market;
-        if (MAKER_BASE..MAKER_BASE + makers).contains(&account) {
-            let i = account - MAKER_BASE;
-            let market = MarketId::try_from(i / self.makers_per_market + 1).expect("markets fit a MarketId");
+        let number = account.get();
+        if (MAKER_BASE..MAKER_BASE + makers).contains(&number) {
+            let i = number - MAKER_BASE;
+            let market =
+                MarketId::new(u16::try_from(i / self.makers_per_market + 1).expect("markets fit a MarketId"));
             Some(Cohort::Maker { market, index: i % self.makers_per_market })
-        } else if (TAKER_BASE..TAKER_BASE + self.takers).contains(&account) {
+        } else if (TAKER_BASE..TAKER_BASE + self.takers).contains(&number) {
             Some(Cohort::Taker)
-        } else if (HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + high_leverage).contains(&account) {
-            let (_, market, side) = self.high_leverage(account - HIGH_LEVERAGE_BASE);
+        } else if (HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + high_leverage).contains(&number) {
+            let (_, market, side) = self.high_leverage(number - HIGH_LEVERAGE_BASE);
             Some(Cohort::HighLeverage { market, side })
-        } else if (THIN_BASE..THIN_BASE + self.thin_accounts).contains(&account) {
+        } else if (THIN_BASE..THIN_BASE + self.thin_accounts).contains(&number) {
             Some(Cohort::Thin)
         } else {
             None
@@ -571,11 +583,11 @@ impl MarketFlowConfig {
     pub fn client_accounts(&self) -> Vec<AccountId> {
         let makers = u32::from(self.markets) * self.makers_per_market;
         let high_leverage = u32::from(self.markets) * self.high_leverage_per_market;
-        let mut accounts: Vec<AccountId> = (MAKER_BASE..MAKER_BASE + makers).collect();
-        accounts.extend(TAKER_BASE..TAKER_BASE + self.takers);
-        accounts.extend(HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + high_leverage);
-        accounts.extend(THIN_BASE..THIN_BASE + self.thin_accounts);
-        accounts
+        let mut numbers: Vec<u32> = (MAKER_BASE..MAKER_BASE + makers).collect();
+        numbers.extend(TAKER_BASE..TAKER_BASE + self.takers);
+        numbers.extend(HIGH_LEVERAGE_BASE..HIGH_LEVERAGE_BASE + high_leverage);
+        numbers.extend(THIN_BASE..THIN_BASE + self.thin_accounts);
+        numbers.into_iter().map(AccountId::new).collect()
     }
 
     /// The deposit of a client account, by its cohort.
@@ -772,7 +784,7 @@ pub fn generate(config: &MarketFlowConfig, timed_client_items: usize) -> FlowPla
 // ---------------------------------------------------------------------------------------
 // The generator's state.
 
-/// Each account's counters, indexed by account id.
+/// Each account's counters, indexed by account id (`AccountId::index`).
 #[derive(Clone, Debug)]
 struct Clients {
     /// The last order sequence used (places only).
@@ -783,22 +795,22 @@ struct Clients {
 
 impl Clients {
     fn new(highest_account: AccountId) -> Clients {
-        let len = highest_account as usize + 1;
+        let len = highest_account.index() + 1;
         Clients { last_order: vec![0; len], last_nonce: vec![0; len] }
     }
 
     /// `command` as `account`'s next client item: it takes the account's next nonce.
     fn send(&mut self, account: AccountId, command: Command) -> Item {
-        let nonce = &mut self.last_nonce[account as usize];
+        let nonce = &mut self.last_nonce[account.index()];
         *nonce += 1;
         Item::Client(ClientItem { account, nonce: *nonce, command })
     }
 
     /// The id of `account`'s next order: its next sequence number (RISK.md 3.1).
     fn next_order_id(&mut self, account: AccountId) -> OrderId {
-        let sequence = &mut self.last_order[account as usize];
+        let sequence = &mut self.last_order[account.index()];
         *sequence += 1;
-        order_id(account, *sequence)
+        order_id(account, OrderSeq::new(*sequence))
     }
 
     /// A new limit order from `account`; returns its id and the item.
@@ -851,7 +863,7 @@ struct Quote {
 impl Quote {
     /// Ticks from the fair value: `2 + j + 2k`.
     fn distance(&self) -> Price {
-        Price::from(2 + self.maker_index + 2 * self.level)
+        Price::new(i64::from(2 + self.maker_index + 2 * self.level))
     }
 }
 
@@ -873,7 +885,7 @@ struct MarketState {
 impl MarketState {
     fn new(config: &MarketFlowConfig, id: MarketId) -> MarketState {
         // Each market has its own three streams: the stream's id plus the market's (14.6).
-        let m = u64::from(id);
+        let m = u64::from(id.get());
         MarketState {
             id,
             params: market_params(id),
@@ -921,9 +933,11 @@ impl MarketState {
     }
 
     /// A thin-layer order `percent`% of the band away from the fair value, on its own side:
-    /// `d = (F × band_ppm / 1,000,000) × percent / 100` (14.5).
+    /// `d = (F × band_ppm / 1,000,000) × percent / 100` (14.5). A price scaled by a rate: on
+    /// the bare number of ticks.
     fn thin_order(&self, side: Side, percent: i64, qty: Qty) -> NewOrder {
-        let distance = self.fair * Price::from(self.params.price_band_ppm) / 1_000_000 * percent / 100;
+        let band_ppm = i64::from(self.params.price_band_ppm);
+        let distance = Price::new(self.fair.ticks() * band_ppm / 1_000_000 * percent / 100);
         let price = match side {
             Side::Buy => self.fair - distance,
             Side::Sell => self.fair + distance,
@@ -940,7 +954,7 @@ impl MarketState {
 
     /// A new size for a quote, from the `MM(m)` stream.
     fn draw_quote_size(&mut self, config: &MarketFlowConfig) -> Qty {
-        self.maker_stream.in_range(config.maker_min_size, config.maker_max_size)
+        self.maker_stream.qty_in_range(config.maker_min_size, config.maker_max_size)
     }
 
     /// Places quote `q` at its target with a new size, as a post-only GTC order.
@@ -993,9 +1007,9 @@ impl MarketState {
                         maker_index,
                         side,
                         level,
-                        order_id: 0,
-                        price: 0,
-                        size: 0,
+                        order_id: OrderId::new(0),
+                        price: Price::ZERO,
+                        size: Qty::ZERO,
                     });
                     self.place_quote(config, self.quotes.len() - 1, clients, out);
                 }
@@ -1015,7 +1029,7 @@ impl MarketState {
             self.jump(config, clients, out);
             return Some(before);
         }
-        let step = self.fair_stream.in_range(-config.max_step, config.max_step);
+        let step = self.fair_stream.ticks_within(config.max_step);
         self.set_fair(config, self.fair + step);
         for q in 0..self.quotes.len() {
             self.requote_if_stale(config, q, clients, out);
@@ -1028,7 +1042,8 @@ impl MarketState {
     /// is stale, and modifying them one by one would cross the other makers' quotes.
     fn jump(&mut self, config: &MarketFlowConfig, clients: &mut Clients, out: &mut Vec<Item>) {
         let ppm = self.fair_stream.in_range(config.jump_min_ppm, config.jump_max_ppm);
-        let size = self.fair * ppm / 1_000_000;
+        // A price scaled by a rate: on the bare number of ticks.
+        let size = Price::new(self.fair.ticks() * ppm / 1_000_000);
         let up = self.fair_stream.below(2) == 0;
         self.set_fair(config, if up { self.fair + size } else { self.fair - size });
         out.push(Item::Operator(Command::SetMark(SetMark { price: self.fair, market: self.id })));
@@ -1058,7 +1073,7 @@ impl MarketState {
         }
         let target = self.target(&self.quotes[q]);
         let quote = self.quotes[q];
-        if (quote.price - target).abs() <= Price::from(quote.level) {
+        if (quote.price - target).ticks().abs() <= i64::from(quote.level) {
             return;
         }
         if self.maker_stream.below(2) == 0 {
@@ -1077,7 +1092,7 @@ impl MarketState {
 
     /// `MarkTick(m)`: the operator's mark, the fair value plus a little noise.
     fn mark_tick(&mut self, config: &MarketFlowConfig) -> Item {
-        let noise = self.mark_stream.in_range(-config.mark_noise, config.mark_noise);
+        let noise = self.mark_stream.ticks_within(config.mark_noise);
         Item::Operator(Command::SetMark(SetMark { price: self.clamp(self.fair + noise), market: self.id }))
     }
 }
@@ -1156,10 +1171,10 @@ impl MarketFlow {
         if let Err(problem) = config.check() {
             panic!("{problem}");
         }
-        let highest_account = config.client_accounts().last().copied().unwrap_or(0);
+        let highest_account = config.client_accounts().last().copied().unwrap_or(AccountId::new(0));
         let mut flow = MarketFlow {
             config,
-            markets: (1..=config.markets).map(|m| MarketState::new(&config, m)).collect(),
+            markets: (1..=config.markets).map(|m| MarketState::new(&config, MarketId::new(m))).collect(),
             clients: Clients::new(highest_account),
             thin: Vec::new(),
             taker_stream: stream(config.seed, stream_ids::TAKER),
@@ -1200,16 +1215,16 @@ impl MarketFlow {
         }
         let replace_every_ms = config.thin_replace_every_ns / 1_000_000;
         let mut offsets = Vec::new();
-        for account in (0..config.thin_accounts).map(|i| THIN_BASE + i) {
+        for account in (0..config.thin_accounts).map(|i| AccountId::new(THIN_BASE + i)) {
             for _ in 0..config.thin_orders_each {
                 // THIN draws, in 14.5's order: market, side, band share, quantity, offset.
                 let rng = &mut self.thin_stream;
-                let market = 1 + rng.below(u64::from(config.markets)) as MarketId;
+                let market = MarketId::new(1 + rng.below(u64::from(config.markets)) as u16);
                 let side = if rng.below(2) == 0 { Side::Buy } else { Side::Sell };
                 let percent = rng.in_range(config.thin_min_band_percent, config.thin_max_band_percent);
-                let qty = rng.in_range(config.thin_min_qty, config.thin_max_qty);
+                let qty = rng.qty_in_range(config.thin_min_qty, config.thin_max_qty);
                 offsets.push(rng.below(replace_every_ms) * 1_000_000);
-                let order = self.markets[usize::from(market) - 1].thin_order(side, percent, qty);
+                let order = self.markets[market.index() - 1].thin_order(side, percent, qty);
                 let (order_id, item) = self.clients.place(account, order);
                 self.thin.push(ThinOrder { account, market, order_id });
                 out.push(item);
@@ -1236,10 +1251,11 @@ impl MarketFlow {
     /// with a quantity from the `HL` stream.
     fn high_leverage_ioc(&mut self, index: u32) -> Item {
         let config = self.config;
-        let qty =
-            self.high_leverage_stream.in_range(config.high_leverage_min_qty, config.high_leverage_max_qty);
+        let qty = self
+            .high_leverage_stream
+            .qty_in_range(config.high_leverage_min_qty, config.high_leverage_max_qty);
         let (account, market, side) = config.high_leverage(index);
-        let order = self.markets[usize::from(market) - 1].ioc(&config, side, qty);
+        let order = self.markets[market.index() - 1].ioc(&config, side, qty);
         self.clients.place(account, order).1
     }
 
@@ -1296,7 +1312,7 @@ impl MarketFlow {
             }
             Recurring::Withdrawal => {
                 let c = &self.config;
-                let account = TAKER_BASE + self.ops_stream.below(u64::from(c.takers)) as AccountId;
+                let account = AccountId::new(TAKER_BASE + self.ops_stream.below(u64::from(c.takers)) as u32);
                 let withdraw = Withdraw { amount: c.withdrawal_amount, account };
                 self.pending.push(Item::Operator(Command::Withdraw(withdraw)));
             }
@@ -1320,10 +1336,10 @@ impl MarketFlow {
         let config = self.config;
         // TAKER draws, in 14.5's order: account, market, side, quantity.
         let rng = &mut self.taker_stream;
-        let account = TAKER_BASE + rng.below(u64::from(config.takers)) as AccountId;
+        let account = AccountId::new(TAKER_BASE + rng.below(u64::from(config.takers)) as u32);
         let market = rng.below(u64::from(config.markets)) as usize;
         let side = if rng.below(2) == 0 { Side::Buy } else { Side::Sell };
-        let qty = rng.in_range(config.taker_min_qty, config.taker_max_qty);
+        let qty = rng.qty_in_range(config.taker_min_qty, config.taker_max_qty);
         let order = self.markets[market].ioc(&config, side, qty);
         let (_, item) = self.clients.place(account, order);
         self.pending.push(item);
@@ -1338,8 +1354,8 @@ impl MarketFlow {
         let rng = &mut self.thin_stream;
         let side = if rng.below(2) == 0 { Side::Buy } else { Side::Sell };
         let percent = rng.in_range(config.thin_min_band_percent, config.thin_max_band_percent);
-        let qty = rng.in_range(config.thin_min_qty, config.thin_max_qty);
-        let order = self.markets[usize::from(thin.market) - 1].thin_order(side, percent, qty);
+        let qty = rng.qty_in_range(config.thin_min_qty, config.thin_max_qty);
+        let order = self.markets[thin.market.index() - 1].thin_order(side, percent, qty);
         let (order_id, item) = self.clients.place(thin.account, order);
         self.thin[o].order_id = order_id;
         self.pending.push(item);
@@ -1371,11 +1387,16 @@ impl Iterator for MarketFlow {
 /// maximum).
 fn setup_a(config: &MarketFlowConfig) -> Vec<Item> {
     let mut commands = Vec::new();
-    for market in 1..=config.markets {
+    for market in (1..=config.markets).map(MarketId::new) {
         let params = market_params(market);
         commands.push(Command::SetMarketParams(params));
-        let tier =
-            SetRiskTier { lower_bound: 0, market, max_leverage: params.max_leverage, index: 0, count: 1 };
+        let tier = SetRiskTier {
+            lower_bound: Micros::ZERO,
+            market,
+            max_leverage: params.max_leverage,
+            index: 0,
+            count: 1,
+        };
         commands.push(Command::SetRiskTier(tier));
         commands.push(Command::SetMark(SetMark { price: start_fair_value(market), market }));
     }

@@ -72,7 +72,7 @@ use engine::book::{Book, BookConfig, BookOptions, OrderBook, RestingOrder};
 use engine::command::{Command, PlaceOrder};
 use engine::event::{CancelReason, Event, EventSink};
 use engine::reference::ReferenceBook;
-use engine::types::{AccountId, OrderId, Price, Qty, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
 thread_local! {
     /// Heap allocations made by this thread so far.
@@ -117,10 +117,11 @@ fn allocations_and_frees_during(f: impl FnOnce()) -> (u64, u64) {
     (ALLOCATIONS.with(Cell::get) - before.0, FREES.with(Cell::get) - before.1)
 }
 
-const MARKET: u16 = 1;
-const CONFIG: BookConfig = BookConfig { market: MARKET, min_price: 1, max_price: 10_000 };
+const MARKET: MarketId = MarketId::new(1);
+const CONFIG: BookConfig =
+    BookConfig { market: MARKET, min_price: Price::new(1), max_price: Price::new(10_000) };
 /// The middle of the market. Passive orders rest within 100 ticks of it on their own side.
-const MID: Price = 5_000;
+const MID: Price = Price::new(5_000);
 const ACCOUNTS: u64 = 8;
 /// Room reserved in the book, well above what the flow ever keeps resting.
 const ORDER_CAPACITY: usize = 4_096;
@@ -198,12 +199,12 @@ impl Flow {
     }
 
     fn account(&mut self) -> AccountId {
-        1 + self.random.below(ACCOUNTS) as AccountId
+        AccountId::new(1 + self.random.below(ACCOUNTS) as u32)
     }
 
     fn new_id(&mut self) -> OrderId {
         self.seq += 1;
-        order_id(self.account(), self.seq)
+        order_id(self.account(), OrderSeq::new(self.seq))
     }
 
     fn pick(&mut self, orders: &[RestingOrder]) -> RestingOrder {
@@ -212,7 +213,7 @@ impl Flow {
 
     /// On `side`'s own side of `MID`, up to 100 ticks away, so an order there usually rests.
     fn passive_price(&mut self, side: Side) -> Price {
-        let distance = self.random.between(1, 100);
+        let distance = Price::new(self.random.between(1, 100));
         match side {
             Side::Buy => MID - distance,
             Side::Sell => MID + distance,
@@ -221,7 +222,7 @@ impl Flow {
 
     /// Up to 20 ticks through `MID`, so an order there trades with what rests near it.
     fn aggressive_price(&mut self, side: Side) -> Price {
-        let distance = self.random.between(0, 20);
+        let distance = Price::new(self.random.between(0, 20));
         match side {
             Side::Buy => MID + distance,
             Side::Sell => MID - distance,
@@ -235,7 +236,7 @@ impl Flow {
         PlaceOrder {
             order_id: self.new_id(),
             price,
-            qty: self.random.between(1, 20),
+            qty: Qty::new(self.random.between(1, 20)),
             market: MARKET,
             side,
             tif: if self.random.percent(15) { TimeInForce::Ioc } else { TimeInForce::Gtc },
@@ -262,20 +263,20 @@ impl Flow {
             450..480 => {
                 let order = self.new_order(true);
                 let malformed = match self.random.below(3) {
-                    0 => PlaceOrder { qty: 0, ..order },
-                    1 => PlaceOrder { price: CONFIG.max_price + 1, ..order },
+                    0 => PlaceOrder { qty: Qty::ZERO, ..order },
+                    1 => PlaceOrder { price: CONFIG.max_price + Price::ONE_TICK, ..order },
                     _ => PlaceOrder { order_id: self.pick(&resting).order_id, ..order },
                 };
                 ("place: malformed or duplicate", Call::Place(malformed))
             }
             480..600 => ("cancel", Call::Cancel(self.pick(&resting).order_id)),
             // An id that is never used.
-            600..620 => ("cancel", Call::Cancel(order_id(1, u32::MAX))),
+            600..620 => ("cancel", Call::Cancel(order_id(AccountId::new(1), OrderSeq::new(u32::MAX)))),
             620..996 => self.modify(book, &resting),
             996..998 => {
                 // Passive orders rest up to 100 ticks from MID, so this takes the orders
                 // within 1 to 10 ticks of it on one side, as a mark move would.
-                let distance = self.random.between(1, 10);
+                let distance = Price::new(self.random.between(1, 10));
                 let call = if self.random.percent(50) {
                     Call::CancelBeyond(Side::Buy, MID - distance)
                 } else {
@@ -298,26 +299,30 @@ impl Flow {
                 // filled something can be sized down to its fills; with none resting, the
                 // size is 0, which is rejected.
                 let partly_filled: Vec<RestingOrder> =
-                    resting.iter().copied().filter(|o| o.filled > 0).collect();
+                    resting.iter().copied().filter(|o| o.filled > Qty::ZERO).collect();
                 let call = if partly_filled.is_empty() {
-                    Call::Modify(id, order.price, 0)
+                    Call::Modify(id, order.price, Qty::ZERO)
                 } else {
                     let o = self.pick(&partly_filled);
-                    Call::Modify(o.order_id, o.price, (o.filled - self.random.between(0, 2)).max(1))
+                    Call::Modify(
+                        o.order_id,
+                        o.price,
+                        (o.filled - Qty::new(self.random.between(0, 2))).max(Qty::new(1)),
+                    )
                 };
                 ("modify: at or below filled", call)
             }
             1 => {
-                let left = (order.qty - self.random.between(1, 5)).max(1);
+                let left = (order.qty - Qty::new(self.random.between(1, 5))).max(Qty::new(1));
                 ("modify: shrink", Call::Modify(id, order.price, order.filled + left))
             }
             2 => ("modify: same size", Call::Modify(id, order.price, total)),
-            3 => ("modify: grow", Call::Modify(id, order.price, total + self.random.between(1, 5))),
+            3 => ("modify: grow", Call::Modify(id, order.price, total + Qty::new(self.random.between(1, 5)))),
             4 => ("modify: new price", Call::Modify(id, self.passive_price(order.side), total)),
             5 => {
                 // At or through the best opposite price: it trades, or, if post-only, is
                 // rejected.
-                let through = self.random.between(0, 3);
+                let through = Price::new(self.random.between(0, 3));
                 let price = match order.side {
                     Side::Buy => book.best_ask().map_or(order.price, |ask| ask + through),
                     Side::Sell => book.best_bid().map_or(order.price, |bid| bid - through),
@@ -326,13 +331,16 @@ impl Flow {
             }
             6 => {
                 let call = if self.random.percent(50) {
-                    Call::Modify(id, order.price, 0)
+                    Call::Modify(id, order.price, Qty::ZERO)
                 } else {
-                    Call::Modify(id, CONFIG.max_price + 1, total)
+                    Call::Modify(id, CONFIG.max_price + Price::ONE_TICK, total)
                 };
                 ("modify: invalid", call)
             }
-            _ => ("modify: unknown id", Call::Modify(order_id(1, u32::MAX), order.price, total)),
+            _ => (
+                "modify: unknown id",
+                Call::Modify(order_id(AccountId::new(1), OrderSeq::new(u32::MAX)), order.price, total),
+            ),
         }
     }
 }
@@ -450,7 +458,7 @@ fn a_warmed_up_book_makes_no_heap_allocation() {
         for &id in &ids {
             assert!(std::hint::black_box(book.order(id)).is_some());
         }
-        for account in 1..=ACCOUNTS as AccountId {
+        for account in (1..=ACCOUNTS as u32).map(AccountId::new) {
             std::hint::black_box(book.open_quantities(account));
         }
     });
@@ -474,7 +482,7 @@ fn bid(id: OrderId, price: Price) -> PlaceOrder {
     PlaceOrder {
         order_id: id,
         price,
-        qty: 1,
+        qty: Qty::new(1),
         market: MARKET,
         side: Side::Buy,
         tif: TimeInForce::Gtc,
@@ -500,10 +508,10 @@ fn place_and_cancel_churn_up_to_the_reserved_capacity_makes_no_heap_allocation()
     for step in 0..500_000 {
         let place = resting.len() < 900 || (resting.len() < SMALL_CAPACITY && random.below(2) == 0);
         let allocations = if place {
-            let account = 1 + random.below(8) as AccountId;
-            let id = order_id(account, seq);
+            let account = AccountId::new(1 + random.below(8) as u32);
+            let id = order_id(account, OrderSeq::new(seq));
             seq += 1;
-            let price = 1 + random.below(1_000) as Price;
+            let price = Price::new(1 + random.below(1_000) as i64);
             resting.push(id);
             allocations_during(|| book.place(&bid(id, price), &mut sink))
         } else {
@@ -530,9 +538,9 @@ fn many_accounts_coming_and_going_make_no_heap_allocation() {
     // almost ten times as many accounts as SMALL_CAPACITY, more than even the maps' doubled
     // room would hold.
     for account in 1..=10_000 {
-        let id = order_id(account, 1);
+        let id = order_id(AccountId::new(account), OrderSeq::new(1));
         let allocations = allocations_during(|| {
-            book.place(&bid(id, 100), &mut sink);
+            book.place(&bid(id, Price::new(100)), &mut sink);
             book.cancel(id, &mut sink);
         });
         assert_eq!(

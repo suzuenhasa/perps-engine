@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use engine::command::{CancelOrder, Command, SetMark};
 use engine::engine::EngineOptions;
-use engine::types::order_id;
+use engine::types::{AccountId, MarketId, OrderSeq, Price, order_id};
 
 use pipeline::affinity::CpuLayout;
 use pipeline::clock::RunClock;
@@ -47,11 +47,14 @@ fn signed_identity() -> JournalIdentity {
 
 /// Record `seq` of a signed journal: a signed cancel of account 9 (152 bytes).
 fn signed_record(seq: u64, anchor: u64) -> JournalRecord {
-    let command = Command::CancelOrder(CancelOrder { order_id: order_id(9, seq as u32), market: 1 });
+    let command = Command::CancelOrder(CancelOrder {
+        order_id: order_id(AccountId::new(9), OrderSeq::new(seq as u32)),
+        market: MarketId::new(1),
+    });
     JournalRecord {
         seq,
         ts: anchor + seq * 1_000,
-        meta: Meta { source: Source::SignedClient, lane: 1, account: 9 },
+        meta: Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) },
         nonce: seq,
         command: encode_command(&command),
         expires_at: u64::MAX,
@@ -66,7 +69,10 @@ fn operator_record(seq: u64, ts: u64) -> JournalRecord {
         ts,
         meta: Meta::OPERATOR,
         nonce: 0,
-        command: encode_command(&Command::SetMark(SetMark { price: seq as i64, market: 1 })),
+        command: encode_command(&Command::SetMark(SetMark {
+            price: Price::new(seq as i64),
+            market: MarketId::new(1),
+        })),
         expires_at: 0,
         signature: [0; SIGNATURE_WORDS],
     }
@@ -317,7 +323,10 @@ fn fresh_start_over_a_lost_header_sector() {
     let pipeline = Pipeline::start(config, inputs, clock, None).expect("a torn first flush is not a journal");
     const LIFE_B: u64 = 20;
     for i in 0..LIFE_B {
-        let command = encode_command(&Command::SetMark(SetMark { price: 1_000 + i as i64, market: 1 }));
+        let command = encode_command(&Command::SetMark(SetMark {
+            price: Price::new(1_000 + i as i64),
+            market: MarketId::new(1),
+        }));
         let record = OperatorRecord { command, t_sched: clock.now(), t_sent: clock.now() };
         while operator.free(1) == 0 {
             IDLE.idle();

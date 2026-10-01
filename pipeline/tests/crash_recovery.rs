@@ -51,7 +51,7 @@ use pipeline::records::{InjectionMode, JournalRecord, Meta, SIGNATURE_WORDS, Sou
 
 use engine::command::{CancelOrder, Command, SetMark};
 use engine::engine::EngineOptions;
-use engine::types::order_id;
+use engine::types::{AccountId, MarketId, OrderSeq, Price, order_id};
 
 mod common;
 use common::XorShift;
@@ -80,11 +80,21 @@ fn identity() -> JournalIdentity {
 /// life never equals a later life's record with the same seq.
 fn record(seq: u64, life: u64, anchor: u64, signed: bool) -> JournalRecord {
     let (meta, nonce, command) = if signed {
-        let meta = Meta { source: Source::SignedClient, lane: 1, account: 9 };
-        let cancel = CancelOrder { order_id: order_id(9, seq as u32), market: life as u16 };
+        let meta = Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) };
+        let cancel = CancelOrder {
+            order_id: order_id(AccountId::new(9), OrderSeq::new(seq as u32)),
+            market: MarketId::new(life as u16),
+        };
         (meta, seq, Command::CancelOrder(cancel))
     } else {
-        (Meta::OPERATOR, 0, Command::SetMark(SetMark { price: (life * 1_000_000 + seq) as i64, market: 1 }))
+        (
+            Meta::OPERATOR,
+            0,
+            Command::SetMark(SetMark {
+                price: Price::new((life * 1_000_000 + seq) as i64),
+                market: MarketId::new(1),
+            }),
+        )
     };
     JournalRecord {
         seq,

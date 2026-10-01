@@ -36,6 +36,7 @@ use engine::command::Command;
 use engine::engine::{Engine, EngineOptions, FUND};
 use engine::event::Event;
 use engine::mode::Fast;
+use engine::types::AccountId;
 use loadgen::{FlowConfig, SyntheticFlow};
 
 /// Commands applied, untimed, before timing starts: as in `book/deep_flow`, enough for the
@@ -167,7 +168,7 @@ fn engine() -> Engine<Book, Fast> {
     let mut setup = Vec::new();
     setup.extend(open_market());
     setup.push(deposit(FUND));
-    for account in 1..=FlowConfig::deep().accounts {
+    for account in (1..=FlowConfig::deep().accounts).map(AccountId::new) {
         setup.extend(fund(account));
     }
     let mut events: Vec<Event> = Vec::new();

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use engine::command::{Command, SetMark};
 use engine::event::{Event, EventSink, MarkPrice};
+use engine::types::{MarketId, Price};
 
 use pipeline::clock::RunClock;
 use pipeline::codec::encode_command;
@@ -21,7 +22,8 @@ const IDLE: IdleStrategy = IdleStrategy::SpinThenYield { spins: 64 };
 
 /// The core record of an operator mark with seq `seq`, for the sink's trailer.
 fn mark_record(seq: u64) -> CoreRecord {
-    let command = encode_command(&Command::SetMark(SetMark { price: 100, market: 1 }));
+    let command =
+        encode_command(&Command::SetMark(SetMark { price: Price::new(100), market: MarketId::new(1) }));
     CoreRecord {
         seq,
         meta: Meta::OPERATOR,
@@ -34,8 +36,9 @@ fn mark_record(seq: u64) -> CoreRecord {
     }
 }
 
+/// A mark of `price` ticks.
 fn mark(price: i64) -> Event {
-    Event::MarkPrice(MarkPrice { price, market: 1 })
+    Event::MarkPrice(MarkPrice { price: Price::new(price), market: MarketId::new(1) })
 }
 
 // F-PARTIAL-RELEASE: when the event ring filled in the middle of a command, the core

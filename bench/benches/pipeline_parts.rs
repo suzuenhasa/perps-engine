@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 use criterion::{Criterion, criterion_group, criterion_main};
 use engine::command::{Command, PlaceOrder};
 use engine::event::{Event, Fill};
-use engine::types::{Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, Micros, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use gateway::eip712::{self, Address, Domain, MAX_OP_BYTES};
 use gateway::keccak::keccak256;
 use gateway::salts::{Request, SaltTable};
@@ -61,13 +61,16 @@ use pipeline::histogram::LatencyHistogram;
 use pipeline::records::ClientRecord;
 use pipeline::ring::channel;
 
+/// The worked example's account (5.6).
+const ACCOUNT_9: AccountId = AccountId::new(9);
+
 /// The worked example's place (5.6).
 fn place() -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(9, 1),
-        price: 102_998,
-        qty: 500_000,
-        market: 3,
+        order_id: order_id(ACCOUNT_9, OrderSeq::new(1)),
+        price: Price::new(102_998),
+        qty: Qty::new(500_000),
+        market: MarketId::new(3),
         side: Side::Buy,
         tif: TimeInForce::Gtc,
         post_only: true,
@@ -76,8 +79,8 @@ fn place() -> Command {
 
 /// The worked example's message, signed: the key, the 72 signed bytes, and `r || s`.
 fn signed_place() -> (SigningKey, [u8; SIGNED_BYTES], [u8; SIGNATURE_BYTES]) {
-    let key = loadgen::keys::signing_key(1, 9);
-    let signed = encode_signed_part(1, 9, 1, u64::MAX, &place());
+    let key = loadgen::keys::signing_key(1, ACCOUNT_9);
+    let signed = encode_signed_part(1, ACCOUNT_9, 1, u64::MAX, &place());
     let signature: Signature = key.sign(&signed);
     (key, signed, signature.to_bytes().into())
 }
@@ -86,9 +89,9 @@ fn signed_place() -> (SigningKey, [u8; SIGNED_BYTES], [u8; SIGNATURE_BYTES]) {
 /// salt 1, as the gateway holds it after its cheap checks: the domain, the decoded message,
 /// `r || s`, and account 9's address.
 fn eip712_place() -> (Domain, DecodedEip712, [u8; SIGNATURE_BYTES], Address) {
-    let key = loadgen::keys::signing_key(1, 9);
+    let key = loadgen::keys::signing_key(1, ACCOUNT_9);
     let domain = Domain::new(1);
-    let message = sign_eip712(&key, &domain, 9, 1, 1_790_000_000_000, &place());
+    let message = sign_eip712(&key, &domain, ACCOUNT_9, 1, 1_790_000_000_000, &place());
     let decoded = decode_eip712(&message).expect("the gateway decodes it");
     (domain, decoded, *signature(&message), PublicKey::K256(*key.verifying_key()).address())
 }
@@ -184,7 +187,7 @@ const NOW_MS: u64 = 1_790_000_000_000;
 
 /// Request `i`: 1,000 accounts, each with its own run of salts, all at `NOW_MS`, in market 1.
 fn request(i: u64) -> Request {
-    Request { account: (i % 1_000) as u32, salt: i, ts_ms: NOW_MS, market: 1 }
+    Request { account: AccountId::new((i % 1_000) as u32), salt: i, ts_ms: NOW_MS, market: MarketId::new(1) }
 }
 
 fn salts(c: &mut Criterion) {
@@ -229,13 +232,13 @@ fn codec(c: &mut Criterion) {
     let command = place();
     let command_words = encode_command(&command);
     let event = Event::Fill(Fill {
-        maker_order: order_id(7, 3),
-        taker_order: order_id(9, 1),
-        price: 102_998,
-        qty: 1_000,
-        maker_fee: 10,
-        taker_fee: 41,
-        market: 3,
+        maker_order: order_id(AccountId::new(7), OrderSeq::new(3)),
+        taker_order: order_id(ACCOUNT_9, OrderSeq::new(1)),
+        price: Price::new(102_998),
+        qty: Qty::new(1_000),
+        maker_fee: Micros::new(10),
+        taker_fee: Micros::new(41),
+        market: MarketId::new(3),
         taker_side: Side::Buy,
     });
     let event_words = encode_event(&event);

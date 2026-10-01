@@ -27,7 +27,9 @@ use engine::command::{
     SetRiskTier, Withdraw,
 };
 use engine::engine::{EngineOptions, FUND};
-use engine::types::{AccountId, MarketId, OrderId, Price, Side, TimeInForce, order_id};
+use engine::types::{
+    AccountId, MarketId, Micros, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id,
+};
 
 /// A tiny deterministic generator (xorshift64), so the tests need no dependency.
 #[derive(Clone, Debug)]
@@ -57,9 +59,10 @@ impl XorShift {
     }
 }
 
-pub const MARKETS: MarketId = 4;
-pub const ACCOUNTS: AccountId = 48;
-const START_MARK: Price = 100_000;
+/// How many markets and accounts the flow has: markets 1 to 4, accounts 1 to 48.
+pub const MARKETS: u16 = 4;
+pub const ACCOUNTS: u32 = 48;
+const START_MARK: Price = Price::new(100_000);
 /// Orders an account remembers for its cancels and modifies.
 const RECENT: usize = 8;
 
@@ -99,10 +102,10 @@ impl TestFlow {
     /// The markets, the fund, and every account's deposit and leverage.
     pub fn setup(&mut self) -> Vec<Command> {
         let mut commands = Vec::new();
-        for market in 1..=MARKETS {
+        for market in (1..=MARKETS).map(MarketId::new) {
             commands.push(Command::SetMarketParams(SetMarketParams {
-                min_price: 1_000,
-                max_price: 1_000_000,
+                min_price: Price::new(1_000),
+                max_price: Price::new(1_000_000),
                 maker_fee_ppm: 100,
                 taker_fee_ppm: 400,
                 price_band_ppm: 20_000,
@@ -110,7 +113,7 @@ impl TestFlow {
                 max_leverage: 20,
             }));
             commands.push(Command::SetRiskTier(SetRiskTier {
-                lower_bound: 0,
+                lower_bound: Micros::ZERO,
                 market,
                 max_leverage: 20,
                 index: 0,
@@ -118,11 +121,12 @@ impl TestFlow {
             }));
             commands.push(Command::SetMark(SetMark { price: START_MARK, market }));
         }
-        commands.push(Command::Deposit(Deposit { amount: 1_000_000, account: FUND }));
-        for account in 1..=ACCOUNTS {
-            commands.push(Command::Deposit(Deposit { amount: 10_000_000_000, account }));
-            for market in 1..=MARKETS {
-                let leverage = if account.is_multiple_of(4) { 20 } else { self.random.between(1, 10) as u16 };
+        commands.push(Command::Deposit(Deposit { amount: Micros::new(1_000_000), account: FUND }));
+        for account in (1..=ACCOUNTS).map(AccountId::new) {
+            commands.push(Command::Deposit(Deposit { amount: Micros::new(10_000_000_000), account }));
+            for market in (1..=MARKETS).map(MarketId::new) {
+                let leverage =
+                    if account.get().is_multiple_of(4) { 20 } else { self.random.between(1, 10) as u16 };
                 commands.push(Command::SetLeverage(SetLeverage { account, market, leverage }));
             }
         }
@@ -131,23 +135,23 @@ impl TestFlow {
 
     /// The next command of the timed flow.
     pub fn next_command(&mut self) -> Command {
-        let account = 1 + self.random.below(u64::from(ACCOUNTS)) as AccountId;
-        let market = 1 + self.random.below(u64::from(MARKETS)) as MarketId;
-        let mark = self.marks[usize::from(market)];
+        let account = AccountId::new(1 + self.random.below(u64::from(ACCOUNTS)) as u32);
+        let market = MarketId::new(1 + self.random.below(u64::from(MARKETS)) as u16);
+        let mark = self.marks[market.index()];
         match self.random.below(100) {
             0..36 => {
                 let side = self.side();
                 let price = match side {
-                    Side::Buy => mark - self.random.between(1, 150),
-                    Side::Sell => mark + self.random.between(1, 150),
+                    Side::Buy => mark - Price::new(self.random.between(1, 150)),
+                    Side::Sell => mark + Price::new(self.random.between(1, 150)),
                 };
                 self.place(account, market, side, price, TimeInForce::Gtc, false)
             }
             36..46 => {
                 let side = self.side();
                 let price = match side {
-                    Side::Buy => mark + self.random.between(0, 800),
-                    Side::Sell => mark - self.random.between(0, 800),
+                    Side::Buy => mark + Price::new(self.random.between(0, 800)),
+                    Side::Sell => mark - Price::new(self.random.between(0, 800)),
                 };
                 self.place(account, market, side, price, TimeInForce::Ioc, false)
             }
@@ -161,16 +165,23 @@ impl TestFlow {
             }
             68..85 => {
                 let (order_id, market) = self.recent_order(account, market);
-                let mark = self.marks[usize::from(market)];
-                let new_price = mark + self.random.between(-200, 200);
-                let new_size = self.random.between(0, 3_000);
+                let mark = self.marks[market.index()];
+                let new_price = mark + Price::new(self.random.between(-200, 200));
+                let new_size = Qty::new(self.random.between(0, 3_000));
                 Command::ModifyOrder(ModifyOrder { order_id, new_price, new_size, market })
             }
             85..93 => self.set_mark(market),
-            93..96 => Command::Deposit(Deposit { amount: self.random.between(1, 5_000_000_000), account }),
-            96..98 => Command::Withdraw(Withdraw { amount: self.random.between(1, 3_000_000_000), account }),
+            93..96 => Command::Deposit(Deposit {
+                amount: Micros::new(self.random.between(1, 5_000_000_000)),
+                account,
+            }),
+            96..98 => Command::Withdraw(Withdraw {
+                amount: Micros::new(self.random.between(1, 3_000_000_000)),
+                account,
+            }),
             _ => {
-                let leverage = if account.is_multiple_of(4) { 20 } else { self.random.between(1, 12) as u16 };
+                let leverage =
+                    if account.get().is_multiple_of(4) { 20 } else { self.random.between(1, 12) as u16 };
                 Command::SetLeverage(SetLeverage { account, market, leverage })
             }
         }
@@ -197,25 +208,25 @@ impl TestFlow {
         tif: TimeInForce,
         post_only: bool,
     ) -> Command {
-        let sequence = self.next_order[account as usize];
-        self.next_order[account as usize] += 1;
-        let id = order_id(account, sequence);
+        let sequence = self.next_order[account.index()];
+        self.next_order[account.index()] += 1;
+        let id = order_id(account, OrderSeq::new(sequence));
         if tif == TimeInForce::Gtc {
-            let recent = &mut self.recent[account as usize];
+            let recent = &mut self.recent[account.index()];
             if recent.len() == RECENT {
                 recent.remove(0);
             }
             recent.push((id, market));
         }
-        let qty = self.random.between(1, if tif == TimeInForce::Ioc { 3_000 } else { 2_000 });
+        let qty = Qty::new(self.random.between(1, if tif == TimeInForce::Ioc { 3_000 } else { 2_000 }));
         Command::PlaceOrder(PlaceOrder { order_id: id, price, qty, market, side, tif, post_only })
     }
 
     /// One of the account's recent orders, or, if it has none, an id it never used.
     fn recent_order(&mut self, account: AccountId, market: MarketId) -> (OrderId, MarketId) {
-        let recent = &self.recent[account as usize];
+        let recent = &self.recent[account.index()];
         if recent.is_empty() {
-            return (order_id(account, u32::MAX), market);
+            return (order_id(account, OrderSeq::new(u32::MAX)), market);
         }
         recent[self.random.below(recent.len() as u64) as usize]
     }
@@ -223,14 +234,14 @@ impl TestFlow {
     /// A walk of up to 150 ticks, or, one time in 30, a jump of 6%; kept within 50,000 to
     /// 200,000.
     fn set_mark(&mut self, market: MarketId) -> Command {
-        let mark = &mut self.marks[usize::from(market)];
+        let mark = &mut self.marks[market.index()];
         let step = if self.random.below(30) == 0 {
-            let jump = *mark * 6 / 100;
+            let jump = mark.ticks() * 6 / 100;
             if self.random.percent(50) { jump } else { -jump }
         } else {
             self.random.between(-150, 150)
         };
-        *mark = (*mark + step).clamp(50_000, 200_000);
+        *mark = (*mark + Price::new(step)).clamp(Price::new(50_000), Price::new(200_000));
         Command::SetMark(SetMark { price: *mark, market })
     }
 }

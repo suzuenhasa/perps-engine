@@ -173,10 +173,10 @@ pub struct Meta {
 
 impl Meta {
     /// Every operator command's meta: lane 0, account 0.
-    pub const OPERATOR: Meta = Meta { source: Source::Operator, lane: 0, account: 0 };
+    pub const OPERATOR: Meta = Meta { source: Source::Operator, lane: 0, account: AccountId::new(0) };
 
     pub const fn pack(self) -> u64 {
-        self.source.code() as u64 | (self.lane as u64) << 16 | (self.account as u64) << 32
+        self.source.code() as u64 | (self.lane as u64) << 16 | (self.account.get() as u64) << 32
     }
 
     /// `None` if the source code is unknown or bits 8-15 are not zero.
@@ -185,7 +185,7 @@ impl Meta {
         if (word >> 8) as u8 != 0 {
             return None;
         }
-        Some(Meta { source, lane: (word >> 16) as u16, account: (word >> 32) as AccountId })
+        Some(Meta { source, lane: (word >> 16) as u16, account: AccountId::new((word >> 32) as u32) })
     }
 
     /// A meta word read from a ring, which only our own code writes (module docs, "Trust").
@@ -660,14 +660,14 @@ mod tests {
     use crate::codec::{command_tag, encode_command, to_le_bytes};
     use engine::command::{CancelOrder, Command, PlaceOrder, SetMark};
     use engine::event::{Ack, Reject};
-    use engine::types::{Side, TimeInForce, order_id};
+    use engine::types::{AccountId, MarketId, OrderId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
     fn place_9_1() -> [u64; COMMAND_WORDS] {
         encode_command(&Command::PlaceOrder(PlaceOrder {
-            order_id: order_id(9, 1),
-            price: 102_998,
-            qty: 500_000,
-            market: 3,
+            order_id: order_id(AccountId::new(9), OrderSeq::new(1)),
+            price: Price::new(102_998),
+            qty: Qty::new(500_000),
+            market: MarketId::new(3),
             side: Side::Buy,
             tif: TimeInForce::Gtc,
             post_only: true,
@@ -685,10 +685,11 @@ mod tests {
 
     #[test]
     fn the_meta_word_has_the_specs_bit_positions() {
-        let meta = Meta { source: Source::SignedClient, lane: 1, account: 9 };
+        let meta = Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) };
         assert_eq!(meta.pack(), 0x0000_0009_0001_0001);
         assert_eq!(Meta::unpack(meta.pack()), Some(meta));
-        let extreme = Meta { source: Source::PreVerifiedClient, lane: u16::MAX, account: u32::MAX };
+        let extreme =
+            Meta { source: Source::PreVerifiedClient, lane: u16::MAX, account: AccountId::new(u32::MAX) };
         assert_eq!(extreme.pack(), 0xFFFF_FFFF_FFFF_0002);
         assert_eq!(Meta::unpack(extreme.pack()), Some(extreme));
         assert_eq!(Meta::OPERATOR.pack(), 3);
@@ -748,7 +749,7 @@ mod tests {
     #[test]
     fn a_client_record_round_trips_and_has_the_specs_word_numbers() {
         let record = ClientRecord {
-            meta: Meta { source: Source::SignedClient, lane: 1, account: 9 },
+            meta: Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) },
             nonce: 1,
             command: place_9_1(),
             expires_at: u64::MAX,
@@ -781,7 +782,10 @@ mod tests {
 
     #[test]
     fn an_operator_record_round_trips_with_the_operator_meta_word() {
-        let command = encode_command(&Command::SetMark(SetMark { price: 103_001, market: 3 }));
+        let command = encode_command(&Command::SetMark(SetMark {
+            price: Price::new(103_001),
+            market: MarketId::new(3),
+        }));
         let record = OperatorRecord { command, t_sched: 5, t_sent: 6 };
         let words = record.to_words();
         assert_eq!(words[0], 3, "source 3, lane 0, account 0");
@@ -794,7 +798,7 @@ mod tests {
     fn a_core_record_round_trips_and_its_first_line_is_the_stampless_record() {
         let record = CoreRecord {
             seq: 5_000,
-            meta: Meta { source: Source::SignedClient, lane: 1, account: 9 },
+            meta: Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) },
             command: place_9_1(),
             t_sched: 1,
             t_sent: 2,
@@ -817,7 +821,7 @@ mod tests {
         let signed = JournalRecord {
             seq: 5_000,
             ts: 1_790_000_000_123_456_789,
-            meta: Meta { source: Source::SignedClient, lane: 1, account: 9 },
+            meta: Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) },
             nonce: 1,
             command: place_9_1(),
             expires_at: 1_790_000_030_000_000_000,
@@ -828,7 +832,10 @@ mod tests {
             ts: 1_790_000_000_123_458_789,
             meta: Meta::OPERATOR,
             nonce: 0,
-            command: encode_command(&Command::SetMark(SetMark { price: 103_001, market: 3 })),
+            command: encode_command(&Command::SetMark(SetMark {
+                price: Price::new(103_001),
+                market: MarketId::new(3),
+            })),
             expires_at: 0,
             signature: [0; SIGNATURE_WORDS],
         };
@@ -851,11 +858,11 @@ mod tests {
         let record = JournalRecord {
             seq: 1,
             ts: 2,
-            meta: Meta { source: Source::PreVerifiedClient, lane: 0, account: 4 },
+            meta: Meta { source: Source::PreVerifiedClient, lane: 0, account: AccountId::new(4) },
             nonce: 3,
             command: encode_command(&Command::CancelOrder(CancelOrder {
-                order_id: order_id(4, 1),
-                market: 0,
+                order_id: order_id(AccountId::new(4), OrderSeq::new(1)),
+                market: MarketId::new(0),
             })),
             expires_at: 99,
             signature: [7; SIGNATURE_WORDS],
@@ -880,10 +887,10 @@ mod tests {
             seq: 5_000,
             source: Source::SignedClient,
             command_tag: command_tag(&Command::PlaceOrder(PlaceOrder {
-                order_id: 1,
-                price: 1,
-                qty: 1,
-                market: 0,
+                order_id: OrderId::new(1),
+                price: Price::new(1),
+                qty: Qty::new(1),
+                market: MarketId::new(0),
                 side: Side::Sell,
                 tif: TimeInForce::Ioc,
                 post_only: false,
@@ -903,15 +910,16 @@ mod tests {
         assert!(is_trailer(&words));
         assert_eq!(Trailer::from_words(&words), trailer);
 
-        let slot = event_slot(5_000, &Event::Ack(Ack { order_id: 7 }));
+        let slot = event_slot(5_000, &Event::Ack(Ack { order_id: OrderId::new(7) }));
         assert_eq!(slot[..2], [5_000, 1]);
         assert!(!is_trailer(&slot));
     }
 
     #[test]
     fn the_outcome_is_the_reject_reason_plus_one() {
-        assert_eq!(outcome(&Event::Ack(Ack { order_id: 1 })), 0);
-        let reject = |reason| Event::Reject(Reject { order_id: 1, account: 1, reason });
+        assert_eq!(outcome(&Event::Ack(Ack { order_id: OrderId::new(1) })), 0);
+        let reject =
+            |reason| Event::Reject(Reject { order_id: OrderId::new(1), account: AccountId::new(1), reason });
         assert_eq!(outcome(&reject(RejectReason::InvalidPrice)), 1);
         assert_eq!(outcome(&reject(RejectReason::InsufficientMargin)), 10);
         assert_eq!(outcome(&reject(RejectReason::NoRiskTiers)), 19);

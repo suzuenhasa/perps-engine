@@ -5,7 +5,7 @@
 //! has its own copy (it signs the benchmark's messages); both must agree with 5.6.
 
 use engine::command::{CancelOrder, Command, ModifyOrder, PlaceOrder};
-use engine::types::{AccountId, MarketId, Side, TimeInForce, order_id};
+use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 use k256::ecdsa::signature::Signer;
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use k256::sha2::{Digest, Sha256};
@@ -27,6 +27,12 @@ pub const ACCOUNT_9_PRIVATE_KEY: &str = "af3ac022da885faa582f5ec5f871ed9d0868a43
 /// Its compressed public key, as `keys.txt` lists it (5.4).
 pub const ACCOUNT_9_PUBLIC_KEY: &str = "03872ba80a104a5c56609998c3da5e267e380deffe94d6e3d024969cb2e0efb729";
 
+/// Account number `n`: the tests name accounts by number, as the spec's examples do
+/// (account 9).
+pub const fn acct(n: u32) -> AccountId {
+    AccountId::new(n)
+}
+
 /// The bytes of hex text: pairs of hex digits, white space ignored.
 pub fn bytes(hex: &str) -> Vec<u8> {
     let digits: String = hex.split_whitespace().collect();
@@ -44,7 +50,7 @@ pub fn signing_key(seed: u64, account: AccountId) -> SigningKey {
             let mut hasher = Sha256::new();
             hasher.update(b"perps-loadgen key v1");
             hasher.update(seed.to_le_bytes());
-            hasher.update(account.to_le_bytes());
+            hasher.update(account.get().to_le_bytes());
             hasher.update([c]);
             SigningKey::from_slice(&hasher.finalize()).ok()
         })
@@ -103,13 +109,14 @@ pub fn high_s_twin(signature: &[u8; SIGNATURE_BYTES]) -> [u8; SIGNATURE_BYTES] {
     twin
 }
 
-/// A post-only GTC bid of `account`'s order `sequence` on market 3.
+/// A post-only GTC bid of `account`'s order `sequence` on market 3: 500,000 lots at 102,998
+/// ticks.
 pub fn place(account: AccountId, sequence: u32) -> Command {
     Command::PlaceOrder(PlaceOrder {
-        order_id: order_id(account, sequence),
-        price: 102_998,
-        qty: 500_000,
-        market: 3,
+        order_id: order_id(account, OrderSeq::new(sequence)),
+        price: Price::new(102_998),
+        qty: Qty::new(500_000),
+        market: MarketId::new(3),
         side: Side::Buy,
         tif: TimeInForce::Gtc,
         post_only: true,
@@ -118,16 +125,19 @@ pub fn place(account: AccountId, sequence: u32) -> Command {
 
 /// A cancel of `account`'s order `sequence` on market 3.
 pub fn cancel(account: AccountId, sequence: u32) -> Command {
-    Command::CancelOrder(CancelOrder { order_id: order_id(account, sequence), market: 3 })
+    Command::CancelOrder(CancelOrder {
+        order_id: order_id(account, OrderSeq::new(sequence)),
+        market: MarketId::new(3),
+    })
 }
 
-/// A modify of `account`'s order `sequence` on market 3.
+/// A modify of `account`'s order `sequence` on market 3, to 250,000 lots at 103,001 ticks.
 pub fn modify(account: AccountId, sequence: u32) -> Command {
     Command::ModifyOrder(ModifyOrder {
-        order_id: order_id(account, sequence),
-        new_price: 103_001,
-        new_size: 250_000,
-        market: 3,
+        order_id: order_id(account, OrderSeq::new(sequence)),
+        new_price: Price::new(103_001),
+        new_size: Qty::new(250_000),
+        market: MarketId::new(3),
     })
 }
 

@@ -41,7 +41,7 @@ use std::cmp::Reverse;
 use crate::book::{BookConfig, BookOptions, BookSnapshot, OrderBook, RestingOrder};
 use crate::command::PlaceOrder;
 use crate::event::{Ack, CancelReason, Cancelled, Event, EventSink, Fill, Modified, Reject, RejectReason};
-use crate::types::{AccountId, OrderId, Price, Qty, Side, TimeInForce, account_of};
+use crate::types::{AccountId, MarketId, Micros, OrderId, Price, Qty, Side, TimeInForce, account_of};
 
 /// A resting order, plus the arrival number that sets its time priority.
 #[derive(Clone, Copy, Debug)]
@@ -72,8 +72,8 @@ impl Entry {
     }
 
     /// Sorts `entries` of one side into priority order: best price first (highest bid,
-    /// lowest ask), then oldest first. `Reverse` rather than `-price`, which would overflow
-    /// for a bid at `Price::MIN`.
+    /// lowest ask), then oldest first. `Reverse` rather than the negated price, which would
+    /// overflow for a bid at `i64::MIN` ticks.
     fn sort_by_priority(side: Side, entries: &mut [Entry]) {
         match side {
             Side::Buy => entries.sort_by_key(|e| (Reverse(e.price), e.arrival)),
@@ -81,7 +81,7 @@ impl Entry {
         }
     }
 
-    fn cancelled(&self, reason: CancelReason, market: u16) -> Event {
+    fn cancelled(&self, reason: CancelReason, market: MarketId) -> Event {
         Event::Cancelled(Cancelled {
             order_id: self.order_id,
             remaining: self.qty,
@@ -114,8 +114,8 @@ impl ReferenceBook {
     fn best_on(&self, side: Side) -> Option<usize> {
         let candidates = self.entries.iter().enumerate().filter(|(_, e)| e.side == side);
         match side {
-            // Highest bid wins; ties go to the oldest. `Reverse` rather than `-price`, which
-            // would overflow for a bid at `Price::MIN`.
+            // Highest bid wins; ties go to the oldest. `Reverse` rather than the negated price,
+            // which would overflow for a bid at `i64::MIN` ticks.
             Side::Buy => candidates.min_by_key(|(_, e)| (Reverse(e.price), e.arrival)).map(|(i, _)| i),
             // Lowest ask wins; ties go to the oldest.
             Side::Sell => candidates.min_by_key(|(_, e)| (e.price, e.arrival)).map(|(i, _)| i),
@@ -148,7 +148,7 @@ impl ReferenceBook {
         mut remaining: Qty,
         events: &mut impl EventSink,
     ) -> Qty {
-        while remaining > 0 {
+        while remaining > Qty::ZERO {
             let Some(i) = self.best_on(side.opposite()) else { break };
             let maker = self.entries[i];
             let crosses = match side {
@@ -172,8 +172,8 @@ impl ReferenceBook {
                 taker_order: taker,
                 price: maker.price,
                 qty,
-                maker_fee: 0,
-                taker_fee: 0,
+                maker_fee: Micros::ZERO,
+                taker_fee: Micros::ZERO,
                 market: self.config.market,
                 taker_side: side,
             }));
@@ -209,7 +209,7 @@ impl OrderBook for ReferenceBook {
 
     fn place(&mut self, order: &PlaceOrder, events: &mut impl EventSink) {
         let id = order.order_id;
-        if order.qty <= 0 {
+        if order.qty <= Qty::ZERO {
             return self.reject(id, RejectReason::InvalidQty, events);
         }
         if !self.price_in_range(order.price) {
@@ -224,7 +224,7 @@ impl OrderBook for ReferenceBook {
 
         events.emit(Event::Ack(Ack { order_id: id }));
         let remaining = self.match_incoming(id, order.side, order.price, order.qty, events);
-        if remaining > 0 {
+        if remaining > Qty::ZERO {
             match order.tif {
                 TimeInForce::Gtc => {
                     self.rest(id, order.side, order.price, remaining, order.qty - remaining, order.post_only)
@@ -252,7 +252,7 @@ impl OrderBook for ReferenceBook {
         let Some(i) = self.position_of(order_id) else {
             return self.reject(order_id, RejectReason::UnknownOrder, events);
         };
-        if new_size <= 0 {
+        if new_size <= Qty::ZERO {
             return self.reject(order_id, RejectReason::InvalidQty, events);
         }
         if !self.price_in_range(new_price) {
@@ -264,7 +264,7 @@ impl OrderBook for ReferenceBook {
 
         // Sized at or below what already filled (typically a modify signed before a fill):
         // nothing is left to fill.
-        if new_remaining <= 0 {
+        if new_remaining <= Qty::ZERO {
             self.entries.remove(i);
             events.emit(entry.cancelled(CancelReason::SizeBelowFilled, self.config.market));
             return;
@@ -291,7 +291,7 @@ impl OrderBook for ReferenceBook {
         self.entries.remove(i);
         events.emit(modified);
         let left = self.match_incoming(order_id, entry.side, new_price, new_remaining, events);
-        if left > 0 {
+        if left > Qty::ZERO {
             let filled = entry.filled + (new_remaining - left);
             self.rest(order_id, entry.side, new_price, left, filled, entry.post_only);
         }
@@ -352,22 +352,31 @@ mod tests {
     //! Hand-written scenarios, one per rule in the module docs. These are the readable
     //! version of the specification; the property tests cover the combinations.
     use super::*;
-    use crate::types::order_id;
+    use crate::types::{OrderSeq, order_id};
 
-    const MARKET: u16 = 1;
-    const ALICE: u32 = 1;
-    const BOB: u32 = 2;
-    const CAROL: u32 = 3;
+    const MARKET: MarketId = MarketId::new(1);
+    const ALICE: AccountId = AccountId::new(1);
+    const BOB: AccountId = AccountId::new(2);
+    const CAROL: AccountId = AccountId::new(3);
 
     fn book() -> ReferenceBook {
-        ReferenceBook::new(BookConfig { market: MARKET, min_price: 1, max_price: 1_000 })
+        ReferenceBook::new(BookConfig { market: MARKET, min_price: px(1), max_price: px(1_000) })
     }
 
-    fn order(account: u32, seq: u32, side: Side, price: Price, qty: Qty) -> PlaceOrder {
+    fn px(ticks: i64) -> Price {
+        Price::new(ticks)
+    }
+
+    fn lots(lots: i64) -> Qty {
+        Qty::new(lots)
+    }
+
+    /// A GTC order of `qty` lots at `price` ticks.
+    fn order(account: AccountId, seq: u32, side: Side, price: i64, qty: i64) -> PlaceOrder {
         PlaceOrder {
-            order_id: order_id(account, seq),
-            price,
-            qty,
+            order_id: order_id(account, OrderSeq::new(seq)),
+            price: px(price),
+            qty: lots(qty),
             market: MARKET,
             side,
             tif: TimeInForce::Gtc,
@@ -385,31 +394,34 @@ mod tests {
         Event::Ack(Ack { order_id: id })
     }
 
-    /// A fill of `taker`'s order, whose side is `taker_side`, against `maker`'s.
-    fn fill(maker: OrderId, taker: &PlaceOrder, price: Price, qty: Qty) -> Event {
+    /// A fill of `taker`'s order, whose side is `taker_side`, against `maker`'s: `qty` lots
+    /// at `price` ticks.
+    fn fill(maker: OrderId, taker: &PlaceOrder, price: i64, qty: i64) -> Event {
         Event::Fill(Fill {
             maker_order: maker,
             taker_order: taker.order_id,
-            price,
-            qty,
-            maker_fee: 0,
-            taker_fee: 0,
+            price: px(price),
+            qty: lots(qty),
+            maker_fee: Micros::ZERO,
+            taker_fee: Micros::ZERO,
             market: MARKET,
             taker_side: taker.side,
         })
     }
 
-    fn cancelled(o: &PlaceOrder, remaining: Qty, reason: CancelReason) -> Event {
+    fn cancelled(o: &PlaceOrder, remaining: i64, reason: CancelReason) -> Event {
+        let remaining = lots(remaining);
         Event::Cancelled(Cancelled { order_id: o.order_id, remaining, market: MARKET, reason, side: o.side })
     }
 
-    fn resting(o: &PlaceOrder, qty: Qty, filled: Qty) -> RestingOrder {
+    /// `o` resting with `qty` lots left and `filled` lots filled.
+    fn resting(o: &PlaceOrder, qty: i64, filled: i64) -> RestingOrder {
         RestingOrder {
             order_id: o.order_id,
             side: o.side,
             price: o.price,
-            qty,
-            filled,
+            qty: lots(qty),
+            filled: lots(filled),
             post_only: o.post_only,
         }
     }
@@ -468,9 +480,9 @@ mod tests {
             vec![RestingOrder {
                 order_id: buy.order_id,
                 side: Side::Buy,
-                price: 100,
-                qty: 3,
-                filled: 2,
+                price: px(100),
+                qty: lots(3),
+                filled: lots(2),
                 post_only: false
             }]
         );
@@ -510,9 +522,9 @@ mod tests {
             vec![RestingOrder {
                 order_id: passive.order_id,
                 side: Side::Buy,
-                price: 99,
-                qty: 1,
-                filled: 0,
+                price: px(99),
+                qty: lots(1),
+                filled: lots(0),
                 post_only: true
             }]
         );
@@ -544,11 +556,11 @@ mod tests {
         assert_eq!(place(&mut b, buy), vec![ack(buy.order_id), fill(highest.order_id, &buy, 1_000, 1)]);
         assert_eq!(
             place(&mut b, order(BOB, 3, Side::Buy, 0, 1)),
-            vec![reject(order_id(BOB, 3), RejectReason::InvalidPrice)]
+            vec![reject(order_id(BOB, OrderSeq::new(3)), RejectReason::InvalidPrice)]
         );
         assert_eq!(
             place(&mut b, order(BOB, 4, Side::Sell, 1_001, 1)),
-            vec![reject(order_id(BOB, 4), RejectReason::InvalidPrice)]
+            vec![reject(order_id(BOB, OrderSeq::new(4)), RejectReason::InvalidPrice)]
         );
     }
 
@@ -575,9 +587,9 @@ mod tests {
         // The order is: quantity, price, duplicate id, post-only.
         let mut b = book();
         let o = order(ALICE, 1, Side::Buy, 100, 1);
-        let bad_both = PlaceOrder { qty: 0, price: 5_000, ..o };
+        let bad_both = PlaceOrder { qty: Qty::ZERO, price: px(5_000), ..o };
         assert_eq!(place(&mut b, bad_both), vec![reject(o.order_id, RejectReason::InvalidQty)]);
-        let bad_price = PlaceOrder { price: 5_000, ..o };
+        let bad_price = PlaceOrder { price: px(5_000), ..o };
         assert_eq!(place(&mut b, bad_price), vec![reject(o.order_id, RejectReason::InvalidPrice)]);
 
         place(&mut b, o);
@@ -585,7 +597,7 @@ mod tests {
         // A resting id with a bad price: price is checked before the duplicate check.
         assert_eq!(place(&mut b, bad_price), vec![reject(o.order_id, RejectReason::InvalidPrice)]);
         // A resting id that is also a crossing post-only: duplicate is checked first.
-        let dup_crossing = PlaceOrder { post_only: true, price: 101, ..o };
+        let dup_crossing = PlaceOrder { post_only: true, price: px(101), ..o };
         assert_eq!(place(&mut b, dup_crossing), vec![reject(o.order_id, RejectReason::Duplicate)]);
     }
 
@@ -606,14 +618,14 @@ mod tests {
         let mut b = book();
         let o = order(ALICE, 1, Side::Buy, 100, 5);
         let mut events = Vec::new();
-        b.modify(o.order_id, 5_000, 0, &mut events);
+        b.modify(o.order_id, px(5_000), lots(0), &mut events);
         assert_eq!(events, vec![reject(o.order_id, RejectReason::UnknownOrder)]);
 
         place(&mut b, o);
         let before = b.snapshot();
         let mut events = Vec::new();
-        b.modify(o.order_id, 5_000, 0, &mut events);
-        b.modify(o.order_id, 5_000, 3, &mut events);
+        b.modify(o.order_id, px(5_000), lots(0), &mut events);
+        b.modify(o.order_id, px(5_000), lots(3), &mut events);
         assert_eq!(
             events,
             vec![
@@ -649,9 +661,9 @@ mod tests {
         place(&mut b, first);
         place(&mut b, second);
         let mut events = Vec::new();
-        b.modify(first.order_id, 100, 2, &mut events);
+        b.modify(first.order_id, px(100), lots(2), &mut events);
         assert_eq!(resting_ids(&b).0, vec![first.order_id, second.order_id]);
-        assert_eq!(b.snapshot().bids[0].qty, 2);
+        assert_eq!(b.snapshot().bids[0].qty, lots(2));
     }
 
     #[test]
@@ -662,7 +674,7 @@ mod tests {
         place(&mut b, first);
         place(&mut b, second);
         let mut events = Vec::new();
-        b.modify(first.order_id, 100, 6, &mut events);
+        b.modify(first.order_id, px(100), lots(6), &mut events);
         assert_eq!(resting_ids(&b).0, vec![second.order_id, first.order_id]);
     }
 
@@ -674,7 +686,7 @@ mod tests {
         place(&mut b, first);
         place(&mut b, second);
         let mut events = Vec::new();
-        b.modify(first.order_id, 101, 5, &mut events);
+        b.modify(first.order_id, px(101), lots(5), &mut events);
         assert_eq!(resting_ids(&b).0, vec![second.order_id, first.order_id]);
     }
 
@@ -686,11 +698,16 @@ mod tests {
         place(&mut b, ask);
         place(&mut b, bid);
         let mut events = Vec::new();
-        b.modify(bid.order_id, 102, 5, &mut events);
+        b.modify(bid.order_id, px(102), lots(5), &mut events);
         assert_eq!(
             events,
             vec![
-                Event::Modified(Modified { order_id: bid.order_id, price: 102, qty: 5, market: MARKET }),
+                Event::Modified(Modified {
+                    order_id: bid.order_id,
+                    price: px(102),
+                    qty: lots(5),
+                    market: MARKET
+                }),
                 fill(ask.order_id, &bid, 102, 3),
             ]
         );
@@ -699,9 +716,9 @@ mod tests {
             vec![RestingOrder {
                 order_id: bid.order_id,
                 side: Side::Buy,
-                price: 102,
-                qty: 2,
-                filled: 3,
+                price: px(102),
+                qty: lots(2),
+                filled: lots(3),
                 post_only: false
             }]
         );
@@ -718,13 +735,18 @@ mod tests {
         place(&mut b, behind);
         place(&mut b, order(BOB, 1, Side::Sell, 100, 4));
         let mut events = Vec::new();
-        b.modify(bid.order_id, 100, 8, &mut events);
+        b.modify(bid.order_id, px(100), lots(8), &mut events);
         assert_eq!(
             events,
-            vec![Event::Modified(Modified { order_id: bid.order_id, price: 100, qty: 4, market: MARKET })]
+            vec![Event::Modified(Modified {
+                order_id: bid.order_id,
+                price: px(100),
+                qty: lots(4),
+                market: MARKET
+            })]
         );
         assert_eq!(resting_ids(&b).0, vec![bid.order_id, behind.order_id]);
-        assert_eq!(b.snapshot().bids[0].filled, 4);
+        assert_eq!(b.snapshot().bids[0].filled, lots(4));
     }
 
     #[test]
@@ -736,7 +758,7 @@ mod tests {
         place(&mut b, bid);
         place(&mut b, order(BOB, 1, Side::Sell, 100, 7));
         let mut events = Vec::new();
-        b.modify(bid.order_id, 100, 5, &mut events);
+        b.modify(bid.order_id, px(100), lots(5), &mut events);
         assert_eq!(events, vec![cancelled(&bid, 3, CancelReason::SizeBelowFilled)]);
         assert!(b.snapshot().bids.is_empty());
 
@@ -745,7 +767,7 @@ mod tests {
         place(&mut b, bid);
         place(&mut b, order(BOB, 2, Side::Sell, 100, 7));
         let mut events = Vec::new();
-        b.modify(bid.order_id, 100, 7, &mut events);
+        b.modify(bid.order_id, px(100), lots(7), &mut events);
         assert_eq!(events, vec![cancelled(&bid, 3, CancelReason::SizeBelowFilled)]);
     }
 
@@ -760,11 +782,16 @@ mod tests {
         let ask = order(BOB, 2, Side::Sell, 101, 1);
         place(&mut b, ask);
         let mut events = Vec::new();
-        b.modify(bid.order_id, 101, 6, &mut events);
+        b.modify(bid.order_id, px(101), lots(6), &mut events);
         assert_eq!(
             events,
             vec![
-                Event::Modified(Modified { order_id: bid.order_id, price: 101, qty: 4, market: MARKET }),
+                Event::Modified(Modified {
+                    order_id: bid.order_id,
+                    price: px(101),
+                    qty: lots(4),
+                    market: MARKET
+                }),
                 fill(ask.order_id, &bid, 101, 1),
             ]
         );
@@ -773,9 +800,9 @@ mod tests {
             vec![RestingOrder {
                 order_id: bid.order_id,
                 side: Side::Buy,
-                price: 101,
-                qty: 3,
-                filled: 3,
+                price: px(101),
+                qty: lots(3),
+                filled: lots(3),
                 post_only: false
             }]
         );
@@ -793,7 +820,7 @@ mod tests {
         }
         // A cancel-and-replace starts resting again, so a1 now counts as the newest.
         let mut events = Vec::new();
-        b.modify(a1.order_id, 97, 1, &mut events);
+        b.modify(a1.order_id, px(97), lots(1), &mut events);
         let mut events = Vec::new();
         b.cancel_account(ALICE, CancelReason::Liquidation, &mut events);
         assert_eq!(
@@ -823,7 +850,7 @@ mod tests {
             place(&mut b, o);
         }
         let mut events = Vec::new();
-        b.cancel_beyond(Side::Buy, 101, CancelReason::PriceBand, &mut events);
+        b.cancel_beyond(Side::Buy, px(101), CancelReason::PriceBand, &mut events);
         assert_eq!(
             events,
             vec![
@@ -845,7 +872,7 @@ mod tests {
             place(&mut b, o);
         }
         let mut events = Vec::new();
-        b.cancel_beyond(Side::Sell, 106, CancelReason::PriceBand, &mut events);
+        b.cancel_beyond(Side::Sell, px(106), CancelReason::PriceBand, &mut events);
         assert_eq!(
             events,
             vec![
@@ -863,8 +890,8 @@ mod tests {
         place(&mut b, ask);
         place(&mut b, order(BOB, 1, Side::Buy, 100, 2));
         assert_eq!(b.order(ask.order_id), Some(resting(&ask, 3, 2)));
-        assert_eq!(b.order(order_id(BOB, 1)), None, "filled in full, so not resting");
-        assert_eq!(b.order(order_id(CAROL, 9)), None, "never placed");
+        assert_eq!(b.order(order_id(BOB, OrderSeq::new(1))), None, "filled in full, so not resting");
+        assert_eq!(b.order(order_id(CAROL, OrderSeq::new(9))), None, "never placed");
     }
 
     #[test]
@@ -879,9 +906,9 @@ mod tests {
             place(&mut b, o);
         }
         place(&mut b, order(CAROL, 1, Side::Sell, 100, 4));
-        assert_eq!(b.open_quantities(ALICE), (1 + 1, 7), "4 of the bid at 100 filled");
-        assert_eq!(b.open_quantities(BOB), (0, 9));
-        assert_eq!(b.open_quantities(CAROL), (0, 0));
+        assert_eq!(b.open_quantities(ALICE), (lots(1 + 1), lots(7)), "4 of the bid at 100 filled");
+        assert_eq!(b.open_quantities(BOB), (Qty::ZERO, lots(9)));
+        assert_eq!(b.open_quantities(CAROL), (Qty::ZERO, Qty::ZERO));
     }
 
     #[test]
@@ -892,7 +919,7 @@ mod tests {
         place(&mut b, bid);
         let before = b.snapshot();
         let mut events = Vec::new();
-        b.modify(bid.order_id, 102, 1, &mut events);
+        b.modify(bid.order_id, px(102), lots(1), &mut events);
         assert_eq!(events, vec![reject(bid.order_id, RejectReason::PostOnlyWouldCross)]);
         assert_eq!(b.snapshot(), before);
     }

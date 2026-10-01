@@ -506,7 +506,7 @@ mod tests {
     use crate::records::{Meta, SIGNATURE_WORDS, Source};
     use engine::command::{CancelOrder, PlaceOrder, SetMark};
     use engine::engine::EngineOptions;
-    use engine::types::{Side, TimeInForce, order_id};
+    use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
     const SEGMENT: u64 = 4_096;
     const ANCHOR: u64 = 1_790_000_000_000_000_000;
@@ -520,10 +520,17 @@ mod tests {
     /// are not.
     fn record(seq: u64) -> JournalRecord {
         let (meta, nonce, command) = if seq.is_multiple_of(3) {
-            (Meta::OPERATOR, 0, Command::SetMark(SetMark { price: seq as i64, market: 1 }))
+            (
+                Meta::OPERATOR,
+                0,
+                Command::SetMark(SetMark { price: Price::new(seq as i64), market: MarketId::new(1) }),
+            )
         } else {
-            let meta = Meta { source: Source::SignedClient, lane: 1, account: 9 };
-            let command = Command::CancelOrder(CancelOrder { order_id: order_id(9, seq as u32), market: 1 });
+            let meta = Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) };
+            let command = Command::CancelOrder(CancelOrder {
+                order_id: order_id(AccountId::new(9), OrderSeq::new(seq as u32)),
+                market: MarketId::new(1),
+            });
             (meta, seq, command)
         };
         JournalRecord {
@@ -709,13 +716,13 @@ mod tests {
 
     #[test]
     fn a_valid_record_that_does_not_fit_is_an_error_and_changes_nothing() {
-        let signed = Meta { source: Source::SignedClient, lane: 1, account: 9 };
+        let signed = Meta { source: Source::SignedClient, lane: 1, account: AccountId::new(9) };
         let place = |account| {
             encode_command(&Command::PlaceOrder(PlaceOrder {
-                order_id: order_id(account, 1),
-                price: 1,
-                qty: 1,
-                market: 1,
+                order_id: order_id(AccountId::new(account), OrderSeq::new(1)),
+                price: Price::new(1),
+                qty: Qty::new(1),
+                market: MarketId::new(1),
                 side: Side::Buy,
                 tif: TimeInForce::Gtc,
                 post_only: false,

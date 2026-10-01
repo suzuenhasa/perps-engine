@@ -142,7 +142,8 @@ const _: () = assert!(SLOT_BYTES == 24);
 
 impl Slot {
     /// A slot never used: all zeros.
-    const UNUSED: Slot = Slot { salt: 0, ts_ms: 0, account: 0, market: 0, used: false };
+    const UNUSED: Slot =
+        Slot { salt: 0, ts_ms: 0, account: AccountId::new(0), market: MarketId::new(0), used: false };
 
     fn holding(request: Request) -> Slot {
         Slot {
@@ -272,12 +273,12 @@ impl SaltTable {
         // this is not a bijection: two requests may share a hash, which only puts them on
         // the same walk.)
         let mut hasher = self.hasher.build_hasher();
-        hasher.write_u32(request.account);
+        hasher.write_u32(request.account.get());
         hasher.write_u64(request.salt);
         hasher.write_u64(request.ts_ms);
         // The hasher has no `u16` write of its own (std's default would feed it the two
         // bytes one at a time), so the market goes in widened, as one value.
-        hasher.write_u64(u64::from(request.market));
+        hasher.write_u64(u64::from(request.market.get()));
         // The capacity is a power of two, so this keeps the hash's low bits, which the
         // splitmix64 scramble makes depend on every bit of the key.
         hasher.finish() as usize & (self.slots.len() - 1)
@@ -314,13 +315,14 @@ fn pre_touch(slots: &mut [Slot]) {
 mod tests {
     use super::*;
     use crate::check::MAX_AGE_MS;
-    use crate::test_support::XorShift;
+    use crate::test_support::{XorShift, acct};
 
     /// A clock in milliseconds since the UNIX epoch.
     const NOW: u64 = 1_790_000_000_000;
     const SEED: u64 = 0x5A17;
-    /// The market of the tests' requests, where a test doesn't vary it.
-    const MARKET: MarketId = 3;
+    /// The market of the tests' requests, where a test doesn't vary it, and another one.
+    const MARKET: MarketId = MarketId::new(3);
+    const OTHER_MARKET: MarketId = MarketId::new(4);
 
     /// A request on market 3.
     fn request(account: AccountId, salt: u64, ts_ms: u64) -> Request {
@@ -331,7 +333,7 @@ mod tests {
     /// at slot `first` of `table` (found by trying salts: about one in `capacity` does).
     fn colliding(table: &SaltTable, first: usize, ts_ms: u64, count: usize) -> Vec<Request> {
         (0..)
-            .map(|salt| request(9, salt, ts_ms))
+            .map(|salt| request(acct(9), salt, ts_ms))
             .filter(|r| table.first_slot(*r) == first)
             .take(count)
             .collect()
@@ -352,15 +354,20 @@ mod tests {
     #[test]
     fn a_request_is_new_until_it_is_inserted_and_then_it_is_reused() {
         let mut table = SaltTable::new(16, SEED);
-        let first = request(9, 42, NOW);
+        let first = request(acct(9), 42, NOW);
         let vacancy = table.find(first, NOW).expect("new");
         assert_eq!(table.used(), 0, "find changes nothing");
         table.insert(vacancy);
         assert_eq!(table.used(), 1);
         assert_eq!(table.find(first, NOW), Err(GatewayReject::ReusedRequest));
         // Another account, salt, timestamp or market is another request.
-        let another_market = Request { market: MARKET + 1, ..first };
-        for other in [request(10, 42, NOW), request(9, 43, NOW), request(9, 42, NOW + 1), another_market] {
+        let another_market = Request { market: OTHER_MARKET, ..first };
+        for other in [
+            request(acct(10), 42, NOW),
+            request(acct(9), 43, NOW),
+            request(acct(9), 42, NOW + 1),
+            another_market,
+        ] {
             assert!(table.find(other, NOW).is_ok(), "{other:?}");
         }
         // Still reused at the edge of the window: 5 minutes exactly.
@@ -420,12 +427,12 @@ mod tests {
         let mut random = XorShift(7);
         let mut inserted = Vec::new();
         while table.used() < table.room() {
-            let r = request(9, random.next(), NOW);
+            let r = request(acct(9), random.next(), NOW);
             table.insert(table.find(r, NOW).expect("room"));
             inserted.push(r);
         }
         for _ in 0..50 {
-            let r = request(9, random.next(), NOW);
+            let r = request(acct(9), random.next(), NOW);
             assert_eq!(table.find(r, NOW), Err(GatewayReject::SaltTableFull), "{r:?}");
         }
         // A request already in is still reported as reused, not as a full table.
@@ -435,7 +442,7 @@ mod tests {
         let later = NOW + MAX_AGE_MS + 1;
         let (mut reused, mut refused) = (0, 0);
         for _ in 0..50 {
-            let r = request(9, random.next(), later);
+            let r = request(acct(9), random.next(), later);
             match table.find(r, later) {
                 Ok(vacancy) => {
                     assert!(table.slots[vacancy.index].used, "an expired slot, never an unused one");
@@ -467,10 +474,10 @@ mod tests {
             // repeat, and some differ only in their market.
             let ts_ms = (now / 1_000 - random.below(MAX_AGE_MS / 1_000)) * 1_000;
             let r = Request {
-                account: random.below(4) as AccountId,
+                account: acct(random.below(4) as u32),
                 salt: random.below(32),
                 ts_ms,
-                market: MARKET + random.below(2) as MarketId,
+                market: if random.below(2) == 0 { MARKET } else { OTHER_MARKET },
             };
             match table.find(r, now) {
                 Err(GatewayReject::ReusedRequest) => {
@@ -499,8 +506,11 @@ mod tests {
         // Module docs, "Why the market is in the key": the same account, salt and timestamp
         // on three markets are three requests, each accepted once, in any order.
         let mut table = SaltTable::new(16, SEED);
-        let genuine = request(9, 42, NOW);
-        let copies = [Request { market: 2, ..genuine }, Request { market: u16::MAX, ..genuine }];
+        let genuine = request(acct(9), 42, NOW);
+        let copies = [
+            Request { market: MarketId::new(2), ..genuine },
+            Request { market: MarketId::new(u16::MAX), ..genuine },
+        ];
         for r in [copies[0], genuine, copies[1]] {
             table.insert(table.find(r, NOW).expect("new"));
         }
@@ -512,14 +522,20 @@ mod tests {
 
     #[test]
     fn the_request_of_a_command_takes_its_market_and_operator_commands_have_none() {
-        use crate::test_support::{cancel, modify, place, with_market};
-        for command in [place(9, 1), cancel(9, 1), modify(9, 1)] {
-            let on_7 = with_market(&command, 7);
-            assert_eq!(Request::of(9, 42, NOW, &command), Some(request(9, 42, NOW)));
-            assert_eq!(Request::of(9, 42, NOW, &on_7), Some(Request { market: 7, ..request(9, 42, NOW) }));
+        use crate::test_support::{acct, cancel, modify, place, with_market};
+        for command in [place(acct(9), 1), cancel(acct(9), 1), modify(acct(9), 1)] {
+            let on_7 = with_market(&command, MarketId::new(7));
+            assert_eq!(Request::of(acct(9), 42, NOW, &command), Some(request(acct(9), 42, NOW)));
+            assert_eq!(
+                Request::of(acct(9), 42, NOW, &on_7),
+                Some(Request { market: MarketId::new(7), ..request(acct(9), 42, NOW) })
+            );
         }
-        let mark = Command::SetMark(engine::command::SetMark { price: 1, market: 3 });
-        assert_eq!(Request::of(9, 42, NOW, &mark), None);
+        let mark = Command::SetMark(engine::command::SetMark {
+            price: engine::types::Price::new(1),
+            market: MarketId::new(3),
+        });
+        assert_eq!(Request::of(acct(9), 42, NOW, &mark), None);
     }
 
     #[test]
@@ -530,12 +546,12 @@ mod tests {
         assert_eq!(table.capacity(), 1 << 10);
         let mut moved = [0; 4]; // for the account, the salt, the timestamp and the market
         for salt in 0..1_000 {
-            let r = request(9, salt, NOW);
+            let r = request(acct(9), salt, NOW);
             let edited = [
-                Request { account: 17, ..r },
+                Request { account: acct(17), ..r },
                 Request { salt: salt + 1_000_000, ..r },
                 Request { ts_ms: NOW + 1, ..r },
-                Request { market: MARKET + 1, ..r },
+                Request { market: OTHER_MARKET, ..r },
             ];
             for (count, other) in moved.iter_mut().zip(edited) {
                 if table.first_slot(other) != table.first_slot(r) {
@@ -552,7 +568,9 @@ mod tests {
     fn the_seed_moves_where_requests_start() {
         let (a, b) = (SaltTable::new(1 << 10, 1), SaltTable::new(1 << 10, 2));
         let moved = (0..1_000)
-            .filter(|&salt| a.first_slot(request(9, salt, NOW)) != b.first_slot(request(9, salt, NOW)))
+            .filter(|&salt| {
+                a.first_slot(request(acct(9), salt, NOW)) != b.first_slot(request(acct(9), salt, NOW))
+            })
             .count();
         assert!(moved > 990, "only {moved} of 1,000 moved");
         assert_ne!(random_seed(), random_seed(), "each call gives another seed");

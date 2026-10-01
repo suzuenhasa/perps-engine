@@ -86,7 +86,7 @@ use crate::event::{BalanceChanged, Event, EventSink, PositionChanged, Reject, Re
 use crate::id_hash::{IdBuildHasher, IdMap};
 use crate::mode::Mode;
 use crate::state::{Account, Market, Slot};
-use crate::types::{AccountId, MarketId, Micros, OrderId, Qty};
+use crate::types::{AccountId, MarketId, Micros, OrderId, Price, Qty};
 
 /// The insurance fund's account id (RISK.md 3.4). No client may use it: the fund can't
 /// place orders, withdraw or set leverage (`ReservedAccount`). It is capitalised by an
@@ -96,6 +96,10 @@ pub const FUND: AccountId = AccountId::MAX;
 /// `Reject.account` for a rejected market-level command (`SetMark`, `SetMarketParams`,
 /// `SetRiskTier`): an id no client can hold, which consumers read as "the operator".
 const OPERATOR: AccountId = AccountId::MAX;
+
+/// `Reject.order_id` for a rejected command that names no order (a deposit, a withdrawal,
+/// a leverage change or a market-level command): 0.
+const NO_ORDER: OrderId = OrderId::new(0);
 
 /// Sizes to reserve up front. None of them changes what the engine does, only how often it
 /// allocates (RISK.md 15.5).
@@ -177,9 +181,9 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
         Engine {
             markets: Vec::new(),
             accounts: IdMap::with_capacity_and_hasher(options.account_capacity, hasher),
-            fund_balance: 0,
+            fund_balance: Micros::ZERO,
             fund_upnl_total: 0,
-            last_reported_uncovered: 0,
+            last_reported_uncovered: Micros::ZERO,
             net_deposits: 0,
             command_counter: 0,
             scratch: Vec::with_capacity(options.scratch_capacity),
@@ -195,10 +199,11 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     /// already hold entries (a replayed engine's, `prefault.rs`). O(the reserved memory):
     /// call it before measuring, never on a command's path.
     pub fn prefault(&mut self) {
-        crate::prefault::touch_map(&mut self.accounts, |i| i as AccountId, || Account::NEW);
-        let filler = Event::MarkPrice(crate::event::MarkPrice { price: 0, market: 0 });
+        crate::prefault::touch_map(&mut self.accounts, |i| AccountId::new(i as u32), || Account::NEW);
+        let filler =
+            Event::MarkPrice(crate::event::MarkPrice { price: Price::ZERO, market: MarketId::new(0) });
         crate::prefault::touch_spare(&mut self.scratch, filler);
-        crate::prefault::touch_spare(&mut self.touched, 0);
+        crate::prefault::touch_spare(&mut self.touched, AccountId::new(0));
         for market in self.markets.iter_mut().flatten() {
             market.prefault();
         }
@@ -210,7 +215,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
     /// reconfigured market's slots), so it belongs after an accepted `SetMarketParams`,
     /// not after a rejected one on a live market.
     pub fn prefault_market(&mut self, market: MarketId) {
-        if let Some(Some(market)) = self.markets.get_mut(usize::from(market)) {
+        if let Some(Some(market)) = self.markets.get_mut(market.index()) {
             market.prefault();
         }
     }
@@ -235,7 +240,7 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
     /// A market, if `SetMarketParams` has created it. For the checks.
     fn find_market(&self, id: MarketId) -> Option<&Market<B>> {
-        self.markets.get(usize::from(id)).and_then(Option::as_ref)
+        self.markets.get(id.index()).and_then(Option::as_ref)
     }
 
     /// The market of a command that passed its checks, which include the market existing.
@@ -245,13 +250,13 @@ impl<B: OrderBook, M: Mode> Engine<B, M> {
 
     /// See [`Engine::market`].
     fn market_mut(&mut self, id: MarketId) -> &mut Market<B> {
-        let market = self.markets.get_mut(usize::from(id)).and_then(Option::as_mut);
+        let market = self.markets.get_mut(id.index()).and_then(Option::as_mut);
         market.unwrap_or_else(|| panic!("market {id} was checked to exist"))
     }
 
     /// The account's free balance: 0 for an account the engine hasn't seen.
     fn free_balance(&self, account: AccountId) -> Micros {
-        self.accounts.get(&account).map_or(0, |state| state.free)
+        self.accounts.get(&account).map_or(Micros::ZERO, |state| state.free)
     }
 
     /// The lowest sequence number the account may use: 0 for an account the engine hasn't
@@ -307,7 +312,7 @@ fn fund_position_event(market: MarketId, fund_pos: Qty, fund_cost: Micros) -> Ev
     Event::PositionChanged(PositionChanged {
         position: fund_pos,
         cost_basis: fund_cost,
-        locked: 0,
+        locked: Micros::ZERO,
         account: FUND,
         market,
     })

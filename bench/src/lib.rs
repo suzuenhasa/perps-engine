@@ -215,14 +215,15 @@ mod tests {
     use engine::book::BookConfig;
     use engine::command::PlaceOrder;
     use engine::reference::ReferenceBook;
-    use engine::types::{Price, Side, TimeInForce, order_id};
+    use engine::types::{AccountId, MarketId, OrderSeq, Price, Qty, Side, TimeInForce, order_id};
 
-    fn place(book: &mut ReferenceBook, sink: &mut CountingSink, seq: u32, side: Side, price: Price) {
+    /// A one-lot GTC order at `price` ticks.
+    fn place(book: &mut ReferenceBook, sink: &mut CountingSink, seq: u32, side: Side, price: i64) {
         let order = PlaceOrder {
-            order_id: order_id(1, seq),
-            price,
-            qty: 1,
-            market: 1,
+            order_id: order_id(AccountId::new(1), OrderSeq::new(seq)),
+            price: Price::new(price),
+            qty: Qty::new(1),
+            market: MarketId::new(1),
             side,
             tif: TimeInForce::Gtc,
             post_only: seq == 99,
@@ -232,7 +233,11 @@ mod tests {
 
     #[test]
     fn depth_counts_orders_and_distinct_prices_on_each_side() {
-        let mut book = ReferenceBook::new(BookConfig { market: 1, min_price: 1, max_price: 1_000 });
+        let mut book = ReferenceBook::new(BookConfig {
+            market: MarketId::new(1),
+            min_price: Price::new(1),
+            max_price: Price::new(1_000),
+        });
         let mut sink = CountingSink::default();
         assert_eq!(Depth::of(&book), Depth { bid_orders: 0, bid_levels: 0, ask_orders: 0, ask_levels: 0 });
         place(&mut book, &mut sink, 1, Side::Buy, 100);
@@ -244,12 +249,16 @@ mod tests {
 
     #[test]
     fn the_sink_splits_rejects_by_reason() {
-        let mut book = ReferenceBook::new(BookConfig { market: 1, min_price: 1, max_price: 1_000 });
+        let mut book = ReferenceBook::new(BookConfig {
+            market: MarketId::new(1),
+            min_price: Price::new(1),
+            max_price: Price::new(1_000),
+        });
         let mut sink = CountingSink::default();
         place(&mut book, &mut sink, 1, Side::Sell, 100);
         place(&mut book, &mut sink, 99, Side::Buy, 100); // post-only, would cross
-        book.cancel(order_id(1, 7), &mut sink); // never placed
-        book.cancel(order_id(1, 8), &mut sink);
+        book.cancel(order_id(AccountId::new(1), OrderSeq::new(7)), &mut sink); // never placed
+        book.cancel(order_id(AccountId::new(1), OrderSeq::new(8)), &mut sink);
         assert_eq!((sink.acks, sink.rejects), (1, 3));
         assert_eq!(sink.reject_reasons.to_string(), "2 unknown order, 1 post-only would cross");
         assert_eq!(RejectCounts::default().to_string(), "none");

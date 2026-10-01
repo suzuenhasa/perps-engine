@@ -70,6 +70,15 @@ debug = "line-tables-only"
 [profile.bench]
 debug = "line-tables-only"
 
+# The engine's integer arithmetic panics on overflow in every build, not only in debug ones:
+# RISK.md 2.4's size limits make overflow impossible, and if they were ever broken a
+# deterministic panic is safe where a silent wrap is not (D-004).
+[profile.release.package.engine]
+overflow-checks = true
+
+[profile.bench.package.engine]
+overflow-checks = true
+
 # Optimise dependencies even in debug builds, so tests that sign or verify (k256) finish in
 # seconds; our own crates stay unoptimised for debugging (docs/PIPELINE.md C33).
 [profile.dev.package."*"]
